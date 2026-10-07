@@ -58,8 +58,8 @@ async function cdpEval (port, expr) {
 }
 
 async function killInstance (instDir) {
-  const psDir = instDir.replace(/\\/g, '\\\\');
-  U.ps(`Get-Process | Where-Object { $_.Path -like '${psDir}\\*' } | Stop-Process -Force`, { ok: true });
+  // PS 单引号字符串中反斜杠是字面量，无需转义；按可执行文件路径过滤，绝不误杀其它 Tabby
+  U.ps(`Get-Process | Where-Object { $_.Path -like '${instDir}\\*' } | Stop-Process -Force`, { ok: true });
 }
 
 async function verifyCommand (bundle) {
@@ -139,4 +139,4 @@ async function verifyCommand (bundle) {
   }
 }
 
-module.exports = { verifyCommand };
+module.exports = { verifyCommand, probePort, waitCdp, killInstance };

@@ -87,6 +87,13 @@ function buildComponent(bundle, st) {
     U.npm(['install', '--no-audit', '--no-fund', ...flags], { cwd: st.cwd });
   }
   U.npm(['run', 'build'], { cwd: st.cwd });
+  // 单测/冒烟（有则必跑，多仓并行开发的第一道互不影响防线）
+  for (const script of ['test', 'smoke']) {
+    if (st.pkg.scripts?.[script]) {
+      console.log(`    npm ${script}`);
+      U.npm(['run', script], { cwd: st.cwd });
+    }
+  }
   // 规范化工件：{package.json, dist/(子目录！), README}
   const dist = path.join(st.cwd, 'dist');
   if (!fs.existsSync(path.join(dist, 'index.js'))) throw new Error(`${st.dir}: dist/index.js 缺失（构建未产出 main 入口）`);
@@ -114,13 +121,27 @@ function buildComponent(bundle, st) {
   return meta;
 }
 
+// core 解包缓存：同版本 zip（hash 一致）只解一次，之后硬链接克隆进 stage（内环提速的关键）
+function ensureCoreTree (core, dst) {
+  const cacheRoot = path.join(P.build, 'core-cache', core.version);
+  const marker = path.join(cacheRoot, '.zip-sha256');
+  if (!fs.existsSync(marker) || fs.readFileSync(marker, 'utf8').trim() !== core.sha256) {
+    console.log(`[core-cache] 解包 ${core.version}（zip sha256 ${core.sha256.slice(0, 12)}…）`);
+    U.rmrf(cacheRoot);
+    fs.mkdirSync(cacheRoot, { recursive: true });
+    U.ps(`Expand-Archive -LiteralPath "${core.file}" -DestinationPath "${cacheRoot}" -Force`);
+    fs.writeFileSync(marker, core.sha256);
+  }
+  U.cloneTree(cacheRoot, dst);
+}
+
 function assemble(bundle, metas, core) {
   const ver = `${bundle.core.version}-s${bundle.suite.serial}`;
   const suiteDir = path.join(P.stage, 'tabby-suite');
   console.log(`\n[assemble] ${ver} → build/stage/tabby-suite/`);
   U.rmrf(P.stage);
   fs.mkdirSync(suiteDir, { recursive: true });
-  U.ps(`Expand-Archive -LiteralPath "${core.file}" -DestinationPath "${suiteDir}" -Force`);
+  ensureCoreTree(core, suiteDir);
   if (!fs.existsSync(path.join(suiteDir, 'Tabby.exe'))) throw new Error('core 解包后未见 Tabby.exe（zip 结构异常）');
   // 插件装入 data/plugins/node_modules/<pkg>（dist 必须是子目录 —— 压平会破坏 main 解析）
   const nm = path.join(suiteDir, 'data', 'plugins', 'node_modules');
@@ -167,4 +188,4 @@ function buildCommand(bundle) {
   assemble(bundle, metas, core);
 }
 
-module.exports = { buildCommand, componentState, ensureCoreZip };
+module.exports = { buildCommand, componentState, buildComponent, ensureCoreZip };

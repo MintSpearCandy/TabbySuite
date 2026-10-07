@@ -1,6 +1,6 @@
 suite:
   name: tabby-suite
-  serial: 3                      # 发布序号，出包时递增
+  serial: 4                      # 发布序号，出包时递增
 core:
   version: 1.0.237               # 官方 portable 版本（vendor/index.json 取 zip）
 profile: base

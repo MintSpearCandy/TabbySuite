@@ -1,4 +1,4 @@
-# TabbySuite 架构设计（v0.4）
+# TabbySuite 架构设计（v0.5）
 
 > 定位：Tabby 集成总装项目 —— 版本集成、滚动更新、便携版打包的单一事实来源。
 > 形态：一个 git 仓库。7 个插件以 git submodule 收编在 `components/` 下，**开发直接在子仓内进行**（原 TabbyPlugins/ 归档退役）。
@@ -15,6 +15,7 @@
 4. **绿了才能出包**：verify 不通过，release 拒绝执行。
 5. **每个边界有 hash**：下载、缓存命中、安装、doctor 全程 SHA256 校验。
 6. **更新只有一条判断规则**：core 变了 → 整包换；core 没变 → 只换插件目录。
+7. **开发与构建分离**：dev 族（长驻实例、脏树、秒级单插件部署）与 build/release 族（钉定、单测、门禁）互不越界——dev 永不产出 releases；硬链接只用于永不执行的树（core-cache→stage），会运行的实例一律实拷。
 
 ---
 
@@ -137,7 +138,7 @@ tabby-suite/                     # 解压到任意目录即可运行
 
 - 收编：`git submodule add <url> components/<dir>`（7 个，含第三方 tabby-command-workbench，checkout v1.2.5 后提交 gitlink，列入 exclude）。
 - **开发就在子仓里**：改码、commit、push 与普通仓库无异；父仓 `git add components/X && git commit` 即把该版本钉入套件——这就是"集成"的全部动作。
-- `suitectl sync` = `git submodule update --remote`（按 .gitmodules branch 前进到远端最新）+ 打印每仓 old→new 摘要 + 提示提交 gitlink。第三方 exclude 仓不做 --remote，只手工显式升级。
+- `suitectl sync` = 分支安全的远端快进：只对"检出在 .gitmodules 声明分支上的干净仓"做 `fetch + merge --ff-only`（在分支上）或 detached 前进；**feature 分支/脏树/游离检出一律跳过并说明**（杜绝 `update --remote` 静默挪走开发分支的隐患）。第三方 exclude 仓与 reference/tabby 不经 sync。
 - **缓存与复现**：规范工件缓存键 = `<pkg>@<gitlink commit>`；脏工作树不走缓存、直接重建，且 `release` 一律拒绝（原则 3）。
 - core 分发不子仓化（官方 portable zip 原样，自建 Electron 成本高收益为负），但**源码以 `reference/tabby` 浅子仓钉定**（v<core 版本>，build 校验同版一致性）供开发参考——查核心实现读 `.ts` 原文，而非 grep 解包实例里的 dist。
 
@@ -151,6 +152,10 @@ tabby-suite/                     # 解压到任意目录即可运行
 - assemble = 官方 zip 解包（原样）+ 拷入全部启用组件的规范工件 + 播种 profile + 写 suite.json。
 
 互斥校验：TerminalWorkwench 与 command-workbench 互为继任（前者一次性导入后者配置），同时集成直接报错。WebViewer↔HotkeyGuard 已有显式兼容代码，默认同装（与 main 实例一致）。
+
+内环提速与多仓防线（2026-10-07 落地）：
+- **core 解包缓存** `build/core-cache/<版本>/`（zip sha256 标记）→ 硬链接克隆进 stage，重复 build 跳过 186MB 解包（实测 35s → 14s）。**硬链铁律**：硬链共享 inode 与文件锁，只用于"永不被执行"的树；dev/verify 实例必须实拷（s4 发布曾因 dev 实例硬链运行锁波及 Compress-Archive 而翻车，已修）。
+- **单测进流水线**：组件构建后自动跑各自 `npm test` / `npm run smoke`（存在才跑、失败即 build 失败）——多仓并行开发时 A 仓改坏的第一道防线。
 
 ### 6.3 verify：发布门禁（P2 已实现）
 
@@ -182,18 +187,31 @@ tabby-suite/                     # 解压到任意目录即可运行
 
 **与内置 updater 的冲突**：profile 种子显式关闭 Tabby 自动更新（确切 config 键在 P3 隔离实例实证后写死，候选 `application.updateAutomatically: false`）。
 
-### 6.6 CLI（6 个动词）
+### 6.6 CLI（双轨动词：开发轨 dev 族 / 构建轨其余）
 
 ```
-suitectl sync      # 子仓拉远端最新 + 变更摘要（= submodule update --remote）
-suitectl build     # core zip 就位 + 全部 integrate 组件构建（按 commit 缓存）+ assemble 到 build/stage/
-suitectl verify    # 隔离实例三级断言；失败保留现场
-suitectl release   # verify 绿 + 子仓干净 → zip + SHA256SUMS + channel + CHANGELOG + 父仓 tag
-suitectl update    # 目标机更新：--check / --apply / --rollback（随包分发精简版 suitectl.ps1）
-suitectl doctor    # 安装态核对（suite.json hash vs 实文件、进程探活）；--gc 清理旧备份/缓存
+── 开发轨（脏树允许 · 长驻实例 · 永不产出 releases）──
+suitectl dev up              # stage 为母本实拷 runtime/dev/ 长驻实例并启动（CDP bind 探测）
+suitectl dev deploy [组件…]   # 默认全部脏组件：构建+直拷进实例（秒级）；--restart 一条龙
+suitectl dev restart|down|status
+── 构建轨（钉定 · 单测 · 门禁）──
+suitectl sync      # 子仓拉远端最新（分支安全：只快进 .gitmodules 分支上的干净检出，feature 分支不设防被挪）
+suitectl build     # core 校验 + 组件构建（含各自 test/smoke）+ assemble（core 解包缓存硬链复用）
+suitectl verify    # 隔离实例四级断言；失败保留现场
+suitectl release   # 门禁三重：verify 绿 + gitlink 远端可解析（先子仓后父仓守门）+ 子仓干净
+suitectl update    # 目标机更新：--check / --apply / --rollback（随包分发精简版 suitectl.ps1）[P3]
+suitectl doctor    # 安装态核对（suite.json hash vs 实文件、进程探活）；--gc 清理旧备份/缓存 [P3]
 ```
 
 实现：Node ≥22、Plain JS、依赖仅 `js-yaml`；zip/解压走 PowerShell `Compress-Archive` / `Expand-Archive`（与现有 package.js 同路线）；hash 用 `node:crypto`。
+
+### 6.8 dev：长驻开发实例（开发/构建分离的落地）
+
+多仓开发的内环轨道，与构建流水线（§6.2–6.4）严格分离：
+
+- `dev up`：以 stage 为母本**全量实拷**出 `runtime/dev/`（instance.json 与 TabbyEnv 同构、CDP 端口 bind 探测、detached 启动长驻——CLI 退出后存活）；`status / down / restart` 管理生命周期（restart 保端口、按可执行文件路径杀进程、含渲染层就绪余量）。
+- `dev deploy [组件…]`：默认只处理**脏** integrate 组件——构建（复用缓存）+ 直拷规范工件进实例 `data/plugins/node_modules/`，单插件秒级；`--restart` 一条命令完成"改码 → 部署 → 重启 → CDP 就绪"。实例内 suite.json 同步记录部署态（版本/commit/dirty/时间）。
+- **纪律**：dev 族允许脏树正是其意义（快速迭代），但**永不产出 releases、永不写 .verify-passed**——出包必须回构建轨（干净树 + 单测 → verify → release 三重门禁）。
 
 ---
 
@@ -260,6 +278,7 @@ regression:                      # 可选：verify 第三级挂钩（cwd 相对 
 | 10 | Node CLI + `js-yaml` + PowerShell 原语 | 与全部现有脚本同栈，零新依赖面 |
 | 11 | **集成仓独立上 GitHub**；子仓远端不变、各自独立维护 | 集成是消费关系而非吞并——父仓只持 gitlink；**子仓本地提交必须先推各自远端，gitlink 才全局可解析**（`clone --recursive` 完整性前置；日常推送顺序：先子仓后父仓） |
 | 12 | Tabby 核心源码以 `reference/tabby` **浅子仓**钉定（v<core>，gitlink 入父仓；不进 components/、不经 sync 前进） | 开发参考与构建包源（vendor zip）分离；参考版本与构建 core 同版由 build 校验；"父仓即锁"对参考源同样成立，且 shallow 不拖重 recursive clone |
+| 13 | **开发/构建双轨制**：dev 族（脏树/长驻实例/秒级部署）与 build/release 族（钉定/单测/三重门禁）分离；硬链仅限永不执行的树 | 统一仓管版本代码，但迭代速度与发布纪律互不妥协；release 增加 gitlink 远端守门，把"先子仓后父仓"从口头纪律变成机器检查 |
 
 ---
 
@@ -299,6 +318,6 @@ regression:                      # 可选：verify 第三级挂钩（cwd 相对 
 
 ---
 
-*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单；v0.3.1（2026-10-07）P1 落地实证回填——verify 信号源定为 renderer console（ELECTRON_ENABLE_LOGGING）、CDP 端口需 bind 探测、R3 部分实证、s1 发布；v0.4（2026-10-07）P2 落地——verify 四级断言实例工厂 + release 门禁 + changelog 抽取，s1 GlassTheme "主题不加载"回归定位（常规主题须 profile 种子选中，`appearance.theme: Glass`）并修复于 s2；v0.4.1（2026-10-07）集成仓上 GitHub + 子仓 lockfile 提交推送（ADR #11）；v0.4.2（2026-10-07）范围审计（profile 收紧/公开/s3）与 `reference/tabby` 源码参考子仓（ADR #12）；**冷复原实测通过**（异目录 `clone --recursive` → checkout `suite/1.0.237-s3` → build → verify 全绿，顺带修复全新克隆 js-yaml 缺失的引导缺口）。*
+*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单；v0.3.1（2026-10-07）P1 落地实证回填——verify 信号源定为 renderer console（ELECTRON_ENABLE_LOGGING）、CDP 端口需 bind 探测、R3 部分实证、s1 发布；v0.4（2026-10-07）P2 落地——verify 四级断言实例工厂 + release 门禁 + changelog 抽取，s1 GlassTheme "主题不加载"回归定位（常规主题须 profile 种子选中，`appearance.theme: Glass`）并修复于 s2；v0.4.1（2026-10-07）集成仓上 GitHub + 子仓 lockfile 提交推送（ADR #11）；v0.4.2（2026-10-07）范围审计（profile 收紧/公开/s3）与 `reference/tabby` 源码参考子仓（ADR #12）；**冷复原实测通过**（异目录 `clone --recursive` → checkout `suite/1.0.237-s3` → build → verify 全绿，顺带修复全新克隆 js-yaml 缺失的引导缺口）；v0.5（2026-10-07）多仓开发支持落地（ADR #13）——dev 命令族（长驻实例/秒级单插件部署）、core 解包缓存（硬链铁律）、单测进流水线、sync 分支安全、release gitlink 远端守门，s4 全门禁发布。*
 
 *附：环境事实以 2026-10-06 为准，变化请同步更新 §1.1 与 §6.3。*

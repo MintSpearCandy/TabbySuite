@@ -69,4 +69,17 @@ function writeJson(f, o) {
 function rmrf(p) { fs.rmSync(p, { recursive: true, force: true }); }
 function stamp() { return new Date().toISOString(); }
 
-module.exports = { P, run, out, npm, ps, git, gitOut, sha256, readJson, writeJson, rmrf, stamp };
+// 同卷树克隆：优先硬链接（零拷贝省盘），失败退化为复制。
+// ⚠ 铁律：硬链共享 inode 与文件锁——只用于"永不被执行/写入"的树（core-cache → stage）；
+//   会被执行的副本（dev 实例、verify 实例）必须 fs.cpSync 实拷。
+function cloneTree (src, dst) {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, e.name), d = path.join(dst, e.name);
+    if (e.isDirectory()) cloneTree(s, d);
+    else if (e.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(s), d);
+    else { try { fs.linkSync(s, d); } catch { fs.copyFileSync(s, d); } }
+  }
+}
+
+module.exports = { P, run, out, npm, ps, git, gitOut, sha256, readJson, writeJson, rmrf, stamp, cloneTree };

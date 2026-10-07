@@ -3,7 +3,8 @@
 Tabby 集成总装仓库：core + 插件套件的构建 / 验证 / 发布 / 更新。**先读 [ARCHITECTURE.md](ARCHITECTURE.md)**（尤其 §0 六原则与 §6 命令语义）再动手。
 
 - 插件开发直接在 `components/<dir>` 子仓内进行（各自 GitHub 远端）；集成 = 子仓 commit → 父仓 commit gitlink。
-- 流水线：`node tools/suitectl/cli.js sync|build|verify|release`（update/doctor 为 P3）。
+- 流水线（双轨）：**开发轨** `suitectl dev up|deploy [--restart]|restart|down|status`（脏树迭代、长驻实例 runtime/dev、秒级单插件部署、永不产出 releases）；**构建轨** `suitectl sync|build|verify|release`（钉定+单测+门禁，update/doctor 为 P3）。
+- 硬链铁律：`core-cache → stage` 可硬链（永不执行）；**会运行的实例（dev/verify）必须实拷**——硬链共享文件锁，运行锁会波及打包。
 
 ## 克隆与拉取
 
