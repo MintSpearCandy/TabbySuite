@@ -2,7 +2,13 @@
 'use strict';
 // suitectl —— TabbySuite 集成流水线 CLI（架构与规则见 ARCHITECTURE.md）
 const fs = require('fs');
-const yaml = require('js-yaml');
+let yaml;
+try {
+  yaml = require('js-yaml');
+} catch {
+  console.error('✗ 缺少依赖 js-yaml —— 全新克隆请先执行一次: cd tools/suitectl && npm install');
+  process.exit(1);
+}
 const U = require('./lib/util');
 const { P } = U;
 const build = require('./lib/build');

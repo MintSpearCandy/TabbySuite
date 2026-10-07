@@ -299,6 +299,6 @@ regression:                      # 可选：verify 第三级挂钩（cwd 相对 
 
 ---
 
-*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单；v0.3.1（2026-10-07）P1 落地实证回填——verify 信号源定为 renderer console（ELECTRON_ENABLE_LOGGING）、CDP 端口需 bind 探测、R3 部分实证、s1 发布；v0.4（2026-10-07）P2 落地——verify 四级断言实例工厂 + release 门禁 + changelog 抽取，s1 GlassTheme "主题不加载"回归定位（常规主题须 profile 种子选中，`appearance.theme: Glass`）并修复于 s2；v0.4.1（2026-10-07）集成仓上 GitHub + 子仓 lockfile 提交推送（ADR #11）；v0.4.2（2026-10-07）范围审计（profile 收紧/公开/s3）与 `reference/tabby` 源码参考子仓（ADR #12）。*
+*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单；v0.3.1（2026-10-07）P1 落地实证回填——verify 信号源定为 renderer console（ELECTRON_ENABLE_LOGGING）、CDP 端口需 bind 探测、R3 部分实证、s1 发布；v0.4（2026-10-07）P2 落地——verify 四级断言实例工厂 + release 门禁 + changelog 抽取，s1 GlassTheme "主题不加载"回归定位（常规主题须 profile 种子选中，`appearance.theme: Glass`）并修复于 s2；v0.4.1（2026-10-07）集成仓上 GitHub + 子仓 lockfile 提交推送（ADR #11）；v0.4.2（2026-10-07）范围审计（profile 收紧/公开/s3）与 `reference/tabby` 源码参考子仓（ADR #12）；**冷复原实测通过**（异目录 `clone --recursive` → checkout `suite/1.0.237-s3` → build → verify 全绿，顺带修复全新克隆 js-yaml 缺失的引导缺口）。*
 
 *附：环境事实以 2026-10-06 为准，变化请同步更新 §1.1 与 §6.3。*

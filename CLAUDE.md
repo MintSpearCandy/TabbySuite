@@ -23,7 +23,7 @@ node tools/suitectl/cli.js sync     # 前进的仓须 git add components/<dir> &
 #       suitectl build 的 [reference] 行校验参考源码与构建 core 同版
 ```
 
-vendor 包源不入 git：全新机器首次 build 前，按 `vendor/index.json` 的 origin 下载对应 zip 放入 `vendor/`（sha256 自动校验）。前提：git、Node ≥22。
+vendor 包源不入 git：全新机器首次 build 前有两步准备——① `cd tools/suitectl && npm install`（装 js-yaml）；② 按 `vendor/index.json` 的 origin 下载对应 zip 放入 `vendor/`（sha256 自动校验）。前提：git、Node ≥22。
 - 产物在 `releases/`（zip 不入库；channel / SHA256SUMS / CHANGELOG 入库）；发布 = 父仓 tag `suite/<core>-s<serial>`。
 - 旧工作区 `D:\Home\Project\TabbyPlugins`（已停用，待重命名为 `TabbyPlugins.archive`：重命名时被进程占用，关闭占用窗口后 `mv` 即可）。
 - 核心源码参考：`reference/tabby`（shallow 子仓，钉 v<core 版本>，build 校验同版；查核心内部实现优先读它，别 grep 解包 dist。未检出时 `git submodule update --init reference/tabby`）。
