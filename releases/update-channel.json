@@ -1,0 +1,44 @@
+{
+  "latest": "1.0.237-s1",
+  "releases": {
+    "1.0.237-s1": {
+      "core": "1.0.237",
+      "zip": "tabby-suite-1.0.237-s1-portable-x64.zip",
+      "sha256": "d8a65017b3e7ae313a995017fb4601c6f6fd90dca8cc54b6302aa7dc1f9c8637",
+      "plugins": {
+        "tabby-webviewer": {
+          "version": "0.4.9",
+          "sha256": "aad4a4dcc79249e28c6c5d82c13dcf66a1f90e706ae726d19a571d4d9c483627",
+          "dirty": true
+        },
+        "tabby-hotkey-guard": {
+          "version": "0.2.1",
+          "sha256": "4f08d36505f9bfc5cca82806907b507f05858e38baddc13fc5d652f1a5e628e9",
+          "dirty": false
+        },
+        "tabby-glass-theme": {
+          "version": "0.4.0",
+          "sha256": "7a723be2577a397812da033cf32a8b0ddab68c2c4af5db85fa189a60f9699a74",
+          "dirty": false
+        },
+        "tabby-output-filter": {
+          "version": "0.5.7",
+          "sha256": "b473f8d2088f66b62b0f7c8951d5f9adc22a8f1e9b964a02ad44f4d3aa2bcf25",
+          "dirty": false
+        },
+        "tabby-better-configer": {
+          "version": "0.1.0",
+          "sha256": "7da3e50f0138840bcf6d8ae2ce475b614b7503f6e434cb6fc77c67b1a4e99b2a",
+          "dirty": true
+        },
+        "tabby-terminal-workwench": {
+          "version": "0.2.0",
+          "sha256": "dc10f44d12ddccb3b1795ff5c1c8063a156fad18330774f2904a159bdec45090",
+          "dirty": false
+        }
+      },
+      "notes": "tabby-webviewer 0.4.9(dirty) @38a9e576; tabby-hotkey-guard 0.2.1 @a0151232; tabby-glass-theme 0.4.0 @6bc30636; tabby-output-filter 0.5.7 @a4242388; tabby-better-configer 0.1.0(dirty) @7a07b882; tabby-terminal-workwench 0.2.0 @ccf93734",
+      "releasedAt": "2026-10-07T00:48:39.760Z"
+    }
+  }
+}
