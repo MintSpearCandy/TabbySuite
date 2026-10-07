@@ -2,6 +2,7 @@
 
 > 定位：Tabby 集成总装项目 —— 版本集成、滚动更新、便携版打包的单一事实来源。
 > 形态：一个 git 仓库。7 个插件以 git submodule 收编在 `components/` 下，**开发直接在子仓内进行**（原 TabbyPlugins/ 归档退役）。
+> 远端：https://github.com/MintSpearCandy/TabbySuite（private）；7 子仓各自独立远端见 `.gitmodules`，互不侵入。
 > 版本纪律一句话：**父仓的 commit/tag 就是锁** —— 它钉死每个子仓的 gitlink 和 bundle.yaml，无需任何 lock 文件。
 
 ---
@@ -256,6 +257,7 @@ regression:                      # 可选：verify 第三级挂钩（cwd 相对 
 | 8 | 更新单规则两路径（core 变→整包；否则→插件目录） | 插件更新占 95% 且实现极简；core 更新天然走完整包，无增量补丁复杂度 |
 | 9 | 版本事实 = 各仓库 `package.json`；套件版本 = `<core>-s<serial>`；发布 = 父仓 tag | 尊重仓库现状；发布记录即 git 历史 |
 | 10 | Node CLI + `js-yaml` + PowerShell 原语 | 与全部现有脚本同栈，零新依赖面 |
+| 11 | **集成仓独立上 GitHub**（private）；子仓远端不变、各自独立维护 | 集成是消费关系而非吞并——父仓只持 gitlink；**子仓本地提交必须先推各自远端，gitlink 才全局可解析**（`clone --recursive` 完整性前置；日常推送顺序：先子仓后父仓） |
 
 ---
 
@@ -295,6 +297,6 @@ regression:                      # 可选：verify 第三级挂钩（cwd 相对 
 
 ---
 
-*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单；v0.3.1（2026-10-07）P1 落地实证回填——verify 信号源定为 renderer console（ELECTRON_ENABLE_LOGGING）、CDP 端口需 bind 探测、R3 部分实证、s1 发布；v0.4（2026-10-07）P2 落地——verify 四级断言实例工厂 + release 门禁 + changelog 抽取，s1 GlassTheme "主题不加载"回归定位（常规主题须 profile 种子选中，`appearance.theme: Glass`）并修复于 s2。*
+*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单；v0.3.1（2026-10-07）P1 落地实证回填——verify 信号源定为 renderer console（ELECTRON_ENABLE_LOGGING）、CDP 端口需 bind 探测、R3 部分实证、s1 发布；v0.4（2026-10-07）P2 落地——verify 四级断言实例工厂 + release 门禁 + changelog 抽取，s1 GlassTheme "主题不加载"回归定位（常规主题须 profile 种子选中，`appearance.theme: Glass`）并修复于 s2；v0.4.1（2026-10-07）集成仓上 GitHub（private）+ 子仓 lockfile 提交推送，ADR #11。*
 
 *附：环境事实以 2026-10-06 为准，变化请同步更新 §1.1 与 §6.3。*
