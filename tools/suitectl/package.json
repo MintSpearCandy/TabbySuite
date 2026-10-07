@@ -1,0 +1,13 @@
+{
+  "name": "suitectl",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TabbySuite integration pipeline CLI (see ARCHITECTURE.md)",
+  "main": "cli.js",
+  "scripts": {
+    "suitectl": "node cli.js"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}

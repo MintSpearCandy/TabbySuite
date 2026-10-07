@@ -1,0 +1,4 @@
+# TabbySuite profile 种子 —— 仅首次安装播种（assemble）；此后归用户所有，更新永不触碰。
+# 注意：updateAutomatically 为禁用内置自动更新的候选键（架构 R3），P3 在隔离实例实证后修正。
+application:
+  updateAutomatically: false

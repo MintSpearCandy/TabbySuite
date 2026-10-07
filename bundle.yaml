@@ -1,0 +1,18 @@
+suite:
+  name: tabby-suite
+  serial: 1                      # 发布序号，出包时递增
+core:
+  version: 1.0.237               # 官方 portable 版本（vendor/index.json 取 zip）
+profile: base
+integrate:                       # 参与集成的子仓；版本 = 各自 gitlink（父仓 commit 即锁）
+  [WebViewer, HotkeyGuard, GlassTheme, Filter, BetterConfiger, TerminalWorkwench]
+exclude: [tabby-command-workbench]   # 已收编不集成（第三方，与 TerminalWorkwench 互斥）
+install:                         # npm install 覆盖（旧代工具链需放宽 peer 解析）
+  WebViewer: { flags: [--legacy-peer-deps] }
+  Filter: { flags: [--legacy-peer-deps] }
+  HotkeyGuard: { flags: [--legacy-peer-deps] }
+regression:                      # P2: verify 第三级回归挂钩（cwd 相对 components/，注入 CDP_PORT）
+  WebViewer: { script: recorderTest.js, cwd: WebViewer/scripts }
+rules:
+  mutuallyExclusive:
+    - [tabby-terminal-workwench, tabby-command-workbench]

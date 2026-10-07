@@ -1,0 +1,28 @@
+[submodule "components/WebViewer"]
+	path = components/WebViewer
+	url = https://github.com/MintSpearCandy/TabbyWebViewer.git
+	branch = main
+[submodule "components/HotkeyGuard"]
+	path = components/HotkeyGuard
+	url = https://github.com/MintSpearCandy/TabbyHotkeyGuard.git
+	branch = main
+[submodule "components/GlassTheme"]
+	path = components/GlassTheme
+	url = https://github.com/MintSpearCandy/tabby-glass-theme.git
+	branch = main
+[submodule "components/Filter"]
+	path = components/Filter
+	url = https://github.com/MintSpearCandy/TabbyOutputFilter.git
+	branch = main
+[submodule "components/BetterConfiger"]
+	path = components/BetterConfiger
+	url = https://github.com/MintSpearCandy/tabby-better-configer.git
+	branch = main
+[submodule "components/TerminalWorkwench"]
+	path = components/TerminalWorkwench
+	url = https://github.com/MintSpearCandy/tabby-terminal-workwench.git
+	branch = main
+[submodule "components/tabby-command-workbench"]
+	path = components/tabby-command-workbench
+	url = https://github.com/rookie0422/tabby-command-workbench.git
+	branch = main
