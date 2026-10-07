@@ -153,7 +153,7 @@ tabby-suite/                     # 解压到任意目录即可运行
 ### 6.3 verify：发布门禁
 
 - 从 `build/stage/<suite>/` 复制出隔离实例 `runtime/instance/`（写 TabbyEnv 同构 `instance.json`，CDP 端口自 9250 分配——tabby-debug skill 与既有 CDP 脚本可直接指向）。
-- 断言三级：① 进程起、`/json/version` 应答；② **插件全载**：log.txt 加载成功行数 == integrate 组件数（main 实例验收同款标准）；③ 可选回归：bundle.yaml 为组件挂仓库自带脚本（如 WebViewer `recorderTest.js`），以 `CDP_PORT` 注入执行。
+- 断言（2026-10-07 s1 验收实证）：以 `ELECTRON_ENABLE_LOGGING=1` 启动并捕获 stderr——渲染层 console 逐条打出 `Found <name> in …data\plugins\node_modules` 与 `Loading <name>`；**断言 = integrate 每组件恰有一条 `Loading <name>`**，且无非良性 ERROR（Jump List 隐私设置报错为良性；terminal-workwench 的 vm module 警告为已知项）。`data/log.txt` 不含插件行，不作信号源。CDP 端口须先 bind 探测再分配（实测 9251 落 Windows 保留端口段报 WSAEACCES、9240 可用）——仅第三级回归挂钩需要 CDP。
 - **失败保留现场**：实例目录与 log 不清理，直接可进入 tabby-debug 流程定位。
 - 兼容性记录：某 commit × 某 core 通过 verify 后，回写 bundle.yaml 注释区 `testedCores`（人工维护一行即可，verify 才是真实门禁）。初始事实：core 1.0.237 × {webviewer, hotkey-guard, glass-theme, better-configer, terminal-workwench, output-filter} 已实证；command-workbench 未本地验证。
 
@@ -261,7 +261,7 @@ regression:                      # 可选：verify 第三级挂钩（cwd 相对 
 |---|---|---|
 | R1 | 旧代工具链（TS 4.2 / NG7 / awesome-typescript-loader）在高版本 Node 下构建未实证 | build 记录每仓 Node 版本；必要时按仓固定构建 Node |
 | R2 | 多数仓库无 lockfile，构建依赖可能漂移 | 缓存键含 package.json hash；逐步给各子仓补 lockfile 后即严格复现 |
-| R3 | 禁用内置自动更新的确切 config 键未实证 | P3 隔离实例验证后写死进 profile |
+| R3 | 禁用内置自动更新的确切 config 键未实证 | **部分实证（2026-10-07）**：`application.updateAutomatically: false` 键被 Tabby 重写保留、且无任何更新落盘痕迹（未自装）；但启动仍会 "Checking for updates / Update available" 日志。P3 继续找完全静默键 |
 | R4 | 更新须应用完全退出（Windows 文件锁）；多实例并存 | update 前置按可执行文件路径检测进程；CDP 探活辅助 |
 | R5 | 磁盘占用（每套件解压 ~250 MB × vendor/cache/releases/runtime） | `doctor --gc`（备份/缓存/旧 zip 保留 N=2） |
 | R6 | 第三方 tabby-command-workbench 源安全 | gitlink 钉 tag + 产物 hash 校验；默认 exclude |
@@ -284,13 +284,13 @@ regression:                      # 可选：verify 第三级挂钩（cwd 相对 
 
 | 阶段 | 内容 | 验收标准 |
 |---|---|---|
-| **P1 收编+MVP 出包** | §10 迁移 1–5 + bundle.yaml + `component-build` + build/assemble + release（verify 先手动） | 产出 `tabby-suite-1.0.237-s1-portable-x64.zip`，解压干净目录启动、6 个启用插件全载（人工核对日志） |
+| **P1 收编+MVP 出包** | §10 迁移 1–5 + bundle.yaml + `component-build` + build/assemble + release（verify 先手动） | ✅ **2026-10-07 完成**：`tabby-suite-1.0.237-s1-portable-x64.zip` 已发布（tag `suite/1.0.237-s1`），验收实例 6/6 插件全载（renderer console `Loading` 行实证），core 文件零改动 |
 | **P2 门禁自动化** | verify 实例工厂（boot/全载/回归挂钩）+ 按 commit 缓存 + CHANGELOG 汇总 + `sync` | `suitectl sync && suitectl build && suitectl verify && suitectl release` 一键绿；同 tag 冷复原重建产物 hash 一致 |
 | **P3 滚动更新** | update-channel + suite-tools（两路径 + rollback + doctor）+ 内置更新禁用实证（R3） | s1→s2 走插件级免重装 core；注入损坏工件能回滚；doctor 能发现篡改 |
 | **P4 可选演进** | dev/stable 双通道、GitHub Releases 作 channel 源、`D:\App\Tabby` 迁移为套件实例、定时检查 | 按需定义 |
 
 ---
 
-*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单。*
+*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单；v0.3.1（2026-10-07）P1 落地实证回填——verify 信号源定为 renderer console（ELECTRON_ENABLE_LOGGING）、CDP 端口需 bind 探测、R3 部分实证、s1 发布。*
 
 *附：环境事实以 2026-10-06 为准，变化请同步更新 §1.1 与 §6.3。*
