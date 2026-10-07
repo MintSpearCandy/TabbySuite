@@ -50,17 +50,23 @@ function releaseCommand(bundle, opts = {}) {
     console.log(`[release] verify 门禁 ✓（${passed.at}）`);
   }
 
-  // gitlink 远端可解析性（"先子仓后父仓"的机器守门）：每个钉定 commit 必须已在子仓远端 main 上
+  // gitlink 门禁（"先子仓后父仓"的机器守门）：①检出 == 父仓钉版（防 sync 后忘 commit 就构建）
+  // ②钉定 commit 必须已在子仓远端 main 上（防父仓指向外界拿不到的提交）
   if (!opts.noRemoteCheck) {
     for (const c of report.components) {
+      const cwd = path.join(P.components, c.dir);
       const sha = U.gitOut(['ls-files', '-s', `components/${c.dir}`]).split(/\s+/)[1];
-      try { U.git(['-C', path.join(P.components, c.dir), 'fetch', 'origin', 'main']); } catch { /* 离线时按本地远端引用判断 */ }
-      const anc = U.run('git', ['-C', path.join(P.components, c.dir), 'merge-base', '--is-ancestor', sha, 'origin/main'], { ok: true });
+      const head = U.gitOut(['-C', cwd, 'rev-parse', 'HEAD']);
+      if (head !== sha) {
+        throw new Error(`${c.dir} 检出(${head.slice(0, 8)})与父仓钉版(${sha.slice(0, 8)})不一致 —— sync 后先 git add components/${c.dir} && git commit 完成钉版，再 build+release`);
+      }
+      try { U.git(['-C', cwd, 'fetch', 'origin', 'main']); } catch { /* 离线时按本地远端引用判断 */ }
+      const anc = U.run('git', ['-C', cwd, 'merge-base', '--is-ancestor', sha, 'origin/main'], { ok: true });
       if (anc.status !== 0) {
         throw new Error(`${c.dir} 钉定的 ${sha.slice(0, 8)} 尚未推送至其远端 main —— 推送顺序：先子仓后父仓（--no-remote-check 可跳过检查）`);
       }
     }
-    console.log(`[release] gitlink 远端可解析 ✓（${report.components.length} 组件）`);
+    console.log(`[release] gitlink 门禁 ✓（${report.components.length} 组件：钉版一致 + 远端可解析）`);
   }
 
   const zipName = `tabby-suite-${ver}-portable-x64.zip`;

@@ -66,7 +66,19 @@ function writeJson(f, o) {
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.writeFileSync(f, JSON.stringify(o, null, 2) + '\n');
 }
-function rmrf(p) { fs.rmSync(p, { recursive: true, force: true }); }
+// Windows 现实加固：CWD 句柄/杀毒扫描会造成瞬时 EPERM/EBUSY/ENOTEMPTY——退避重试，
+// 最终失败给出可行动诊断（而非裸 code）
+function rmrf (p) {
+  for (let i = 1; ; i++) {
+    try { fs.rmSync(p, { recursive: true, force: true }); return; }
+    catch (e) {
+      if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(e.code) || i >= 5) {
+        throw new Error(`无法删除 ${p}（${e.code}）—— 目录被占用：检查是否有终端/资源管理器停在该目录、Tabby 是否从中运行、或杀毒软件瞬时扫描，排除后重试`);
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400 * i); // 同步退避
+    }
+  }
+}
 function stamp() { return new Date().toISOString(); }
 
 // 同卷树克隆：优先硬链接（零拷贝省盘），失败退化为复制。
