@@ -1,6 +1,6 @@
 suite:
   name: tabby-suite
-  serial: 1                      # 发布序号，出包时递增
+  serial: 2                      # 发布序号，出包时递增
 core:
   version: 1.0.237               # 官方 portable 版本（vendor/index.json 取 zip）
 profile: base
@@ -11,8 +11,13 @@ install:                         # npm install 覆盖（旧代工具链需放宽
   WebViewer: { flags: [--legacy-peer-deps] }
   Filter: { flags: [--legacy-peer-deps] }
   HotkeyGuard: { flags: [--legacy-peer-deps] }
-regression:                      # P2: verify 第三级回归挂钩（cwd 相对 components/，注入 CDP_PORT）
-  WebViewer: { script: recorderTest.js, cwd: WebViewer/scripts }
+probes:                          # verify ③：渲染层 CDP 探针（expr 求值结果须 === expect）
+  GlassTheme:
+    - { expr: "!!window.__glassConfig && !!document.querySelector('style#glass-vars')", expect: "true" }
+    - { expr: "window.__glassConfig ? window.__glassConfig.store.appearance.theme : 'no-cfg'", expect: "Glass" }
+regression:                      # verify ④：仓库自带回归挂钩（CDP_PORT 注入；enabled 才跑）
+  WebViewer:
+    { script: recorderTest.js, cwd: WebViewer/scripts, enabled: false }   # 依赖 wv 实例 fixture 基线，种子化后启用
 rules:
   mutuallyExclusive:
     - [tabby-terminal-workwench, tabby-command-workbench]

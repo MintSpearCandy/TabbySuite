@@ -14,6 +14,21 @@ function cmpVer(a, b) {
   return Number(as) - Number(bs);
 }
 
+// 抽取组件仓库的版本 changelog：RELEASE_NOTES.md（# v<ver> 段）→ CHANGELOG.md（## <ver> 段）→ null
+function extractNotes (dir, version) {
+  const rn = path.join(P.components, dir, 'RELEASE_NOTES.md');
+  if (fs.existsSync(rn)) {
+    const sec = fs.readFileSync(rn, 'utf8').split(/^# /m).find(s => s.startsWith(`v${version}`));
+    if (sec) return sec.split('\n').slice(1, 9).join('\n').trim() || null;
+  }
+  const cl = path.join(P.components, dir, 'CHANGELOG.md');
+  if (fs.existsSync(cl)) {
+    const sec = fs.readFileSync(cl, 'utf8').split(/^## /m).find(s => s.startsWith(`v${version}`) || s.startsWith(`${version}`));
+    if (sec) return sec.split('\n').slice(1, 9).join('\n').trim() || null;
+  }
+  return null;
+}
+
 function releaseCommand(bundle, opts = {}) {
   const ver = `${bundle.core.version}-s${bundle.suite.serial}`;
   if (!fs.existsSync(P.buildReport)) throw new Error('无 build/build-report.json —— 先 suitectl build');
@@ -25,7 +40,15 @@ function releaseCommand(bundle, opts = {}) {
   if (dirty.length && !opts.allowDirty) {
     throw new Error(`脏子仓拒绝发布: ${dirty.map(c => c.dir).join(', ')}（提交后重跑 build+release，或 --allow-dirty 显式放行）`);
   }
-  // P2 起在此校验 build/.verify-passed（未过 verify 不出包）
+  // verify 门禁：绿了才能出包
+  if (!opts.noVerify) {
+    const passedPath = path.join(P.build, '.verify-passed');
+    const passed = fs.existsSync(passedPath) ? U.readJson(passedPath) : null;
+    if (!passed || passed.suiteVersion !== ver) {
+      throw new Error(`verify 未通过或过期（无 ${ver} 的 build/.verify-passed）—— 先 suitectl verify，或 --no-verify 显式跳过`);
+    }
+    console.log(`[release] verify 门禁 ✓（${passed.at}）`);
+  }
 
   const zipName = `tabby-suite-${ver}-portable-x64.zip`;
   const zipPath = path.join(P.releases, zipName);
@@ -48,11 +71,17 @@ function releaseCommand(bundle, opts = {}) {
   ch.latest = ver;
   U.writeJson(P.channel, ch);
 
-  // CHANGELOG（P1 组件清单式；P2 起自各仓库 RELEASE_NOTES / CHANGELOG 抽取对应版本段落）
-  let md = '# TabbySuite CHANGELOG\n\n> P1：组件清单式；P2 起自动抽取各仓库 changelog 对应版本段落。\n';
-  for (const [v, r] of Object.entries(ch.releases).sort(cmpVer).reverse()) {
+  // CHANGELOG：组件清单 + 自各仓库 RELEASE_NOTES.md / CHANGELOG.md 抽取对应版本段落（至多 8 行）
+  let md = '# TabbySuite CHANGELOG\n';
+  for (const [v, r] of Object.entries(ch.releases).sort(([a], [b]) => cmpVer(a, b)).reverse()) {
     md += `\n## ${v} — ${r.releasedAt}\n\n- core: ${r.core}（官方 portable 原样）\n`;
-    md += Object.entries(r.plugins).map(([n, p]) => `- ${n} ${p.version}${p.dirty ? ' **(dirty)**' : ''}`).join('\n') + '\n';
+    md += Object.entries(r.plugins).map(([n, p]) => {
+      let line = `- ${n} ${p.version}${p.dirty ? ' **(dirty)**' : ''}`;
+      const comp = report.components.find(c => c.name === n);
+      const note = comp && extractNotes(comp.dir, p.version);
+      if (note) line += '\n' + note.split('\n').map(l => `  > ${l}`).join('\n');
+      return line;
+    }).join('\n') + '\n';
   }
   fs.writeFileSync(path.join(P.releases, 'CHANGELOG.md'), md);
 

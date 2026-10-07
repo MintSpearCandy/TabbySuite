@@ -1,4 +1,4 @@
-# TabbySuite 架构设计（v0.3）
+# TabbySuite 架构设计（v0.4）
 
 > 定位：Tabby 集成总装项目 —— 版本集成、滚动更新、便携版打包的单一事实来源。
 > 形态：一个 git 仓库。7 个插件以 git submodule 收编在 `components/` 下，**开发直接在子仓内进行**（原 TabbyPlugins/ 归档退役）。
@@ -150,18 +150,22 @@ tabby-suite/                     # 解压到任意目录即可运行
 
 互斥校验：TerminalWorkwench 与 command-workbench 互为继任（前者一次性导入后者配置），同时集成直接报错。WebViewer↔HotkeyGuard 已有显式兼容代码，默认同装（与 main 实例一致）。
 
-### 6.3 verify：发布门禁
+### 6.3 verify：发布门禁（P2 已实现）
 
-- 从 `build/stage/<suite>/` 复制出隔离实例 `runtime/instance/`（写 TabbyEnv 同构 `instance.json`，CDP 端口自 9250 分配——tabby-debug skill 与既有 CDP 脚本可直接指向）。
-- 断言（2026-10-07 s1 验收实证）：以 `ELECTRON_ENABLE_LOGGING=1` 启动并捕获 stderr——渲染层 console 逐条打出 `Found <name> in …data\plugins\node_modules` 与 `Loading <name>`；**断言 = integrate 每组件恰有一条 `Loading <name>`**，且无非良性 ERROR（Jump List 隐私设置报错为良性；terminal-workwench 的 vm module 警告为已知项）。`data/log.txt` 不含插件行，不作信号源。CDP 端口须先 bind 探测再分配（实测 9251 落 Windows 保留端口段报 WSAEACCES、9240 可用）——仅第三级回归挂钩需要 CDP。
-- **失败保留现场**：实例目录与 log 不清理，直接可进入 tabby-debug 流程定位。
-- 兼容性记录：某 commit × 某 core 通过 verify 后，回写 bundle.yaml 注释区 `testedCores`（人工维护一行即可，verify 才是真实门禁）。初始事实：core 1.0.237 × {webviewer, hotkey-guard, glass-theme, better-configer, terminal-workwench, output-filter} 已实证；command-workbench 未本地验证。
+`suitectl verify` 把 stage 全新拷贝为 `runtime/instance/`（TabbyEnv 同构 `instance.json`；CDP 端口在 9241–9268 内 **bind 探测**分配——Windows 保留段随重启漂移，2026-10-07 实测 9249–9348 整段不可绑、9251 报 WSAEACCES），以 `ELECTRON_ENABLE_LOGGING=1` 启动并捕获 stderr，四级断言：
+
+1. **插件全载**：renderer console 的 `Loading <name>:` 行——Tabby 会剥 `tabby-` 前缀（日志是 `Loading glass-theme:` 而非包名）；`data/log.txt` 不含插件行，不作信号源；
+2. **无致命 ERROR**：过滤已知良性（Jump List 隐私设置花边；terminal-workwench 的 vm module 警告是 INFO 不拦截）；
+3. **CDP 探针**（bundle.yaml `probes:`）：渲染层任意表达式 === 期望——GlassTheme 探针含 `appearance.theme === 'Glass'`（s1 "主题不加载"回归的防复发：GlassTheme 是不接管配置的常规主题，须 profile 种子 `appearance.theme: Glass` 显式选中）；
+4. **回归挂钩**（bundle.yaml `regression:`，`enabled: true` 才跑）：`CDP_PORT` 注入执行仓库自带脚本（WebViewer `recorderTest.js` 依赖 wv fixture 基线，种子化前保持 disabled）。
+
+通过写 `build/.verify-passed`（含 suiteVersion，release 校验版本匹配防过期）；**失败保留现场**（实例目录 + `runtime/instance-boot.err`），直接进 tabby-debug 流程定位。
 
 ### 6.4 release：出包即打 tag
 
-前置：verify 绿 + 全部子仓干净 + bundle.yaml serial 递增（未递增则提示）。产出：
+前置：`build/.verify-passed` 版本匹配（P2 门禁已实现，`--no-verify` 显式跳过）+ 全部子仓干净 + bundle.yaml serial 递增。产出：
 - `releases/tabby-suite-<core>-s<serial>-portable-x64.zip`
-- `SHA256SUMS`、`update-channel.json`（见 §7）、`CHANGELOG.md`（从各仓 RELEASE_NOTES.md / CHANGELOG.md 抽取对应版本段落自动汇总，三种风格三个抽取器，缺省填"见仓库"）；
+- `SHA256SUMS`、`update-channel.json`（见 §7）、`CHANGELOG.md`（自各仓 `RELEASE_NOTES.md` `# v<ver>` 段 / `CHANGELOG.md` `## <ver>` 段抽取对应版本段落，至多 8 行，无则从略）；
 - 父仓打 annotated tag `suite/<core>-s<serial>` —— **tag 即发布记录**，日后按 tag 冷复原重建（`git clone --recursive` → checkout tag → build，产物 hash 应一致）。
 
 ### 6.5 滚动更新（G2）
@@ -285,12 +289,12 @@ regression:                      # 可选：verify 第三级挂钩（cwd 相对 
 | 阶段 | 内容 | 验收标准 |
 |---|---|---|
 | **P1 收编+MVP 出包** | §10 迁移 1–5 + bundle.yaml + `component-build` + build/assemble + release（verify 先手动） | ✅ **2026-10-07 完成**：`tabby-suite-1.0.237-s1-portable-x64.zip` 已发布（tag `suite/1.0.237-s1`），验收实例 6/6 插件全载（renderer console `Loading` 行实证），core 文件零改动 |
-| **P2 门禁自动化** | verify 实例工厂（boot/全载/回归挂钩）+ 按 commit 缓存 + CHANGELOG 汇总 + `sync` | `suitectl sync && suitectl build && suitectl verify && suitectl release` 一键绿；同 tag 冷复原重建产物 hash 一致 |
+| **P2 门禁自动化** | verify 实例工厂（boot/全载/回归挂钩）+ 按 commit 缓存 + CHANGELOG 汇总 + `sync` | ✅ **2026-10-07 完成**：verify 四级断言 + release 门禁 + changelog 抽取落地，s2 为首个过门禁版本（顺带修复 cmpVer 二条目比较 bug）。剩余：WebViewer 回归挂钩启用（待 wv fixture 种子化） |
 | **P3 滚动更新** | update-channel + suite-tools（两路径 + rollback + doctor）+ 内置更新禁用实证（R3） | s1→s2 走插件级免重装 core；注入损坏工件能回滚；doctor 能发现篡改 |
 | **P4 可选演进** | dev/stable 双通道、GitHub Releases 作 channel 源、`D:\App\Tabby` 迁移为套件实例、定时检查 | 按需定义 |
 
 ---
 
-*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单；v0.3.1（2026-10-07）P1 落地实证回填——verify 信号源定为 renderer console（ELECTRON_ENABLE_LOGGING）、CDP 端口需 bind 探测、R3 部分实证、s1 发布。*
+*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单；v0.3.1（2026-10-07）P1 落地实证回填——verify 信号源定为 renderer console（ELECTRON_ENABLE_LOGGING）、CDP 端口需 bind 探测、R3 部分实证、s1 发布；v0.4（2026-10-07）P2 落地——verify 四级断言实例工厂 + release 门禁 + changelog 抽取，s1 GlassTheme "主题不加载"回归定位（常规主题须 profile 种子选中，`appearance.theme: Glass`）并修复于 s2。*
 
 *附：环境事实以 2026-10-06 为准，变化请同步更新 §1.1 与 §6.3。*

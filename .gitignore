@@ -5,3 +5,4 @@ runtime/
 vendor/*.zip
 releases/*.zip
 *.log
+releases/*/

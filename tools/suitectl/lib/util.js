@@ -26,7 +26,7 @@ function run(file, args, opts = {}) {
   const r = spawnSync(file, args, {
     cwd: opts.cwd || ROOT,
     stdio: opts.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-    env: process.env,
+    env: opts.env || process.env,
     maxBuffer: 64 * 1024 * 1024,
   });
   if (r.status !== 0 && !opts.ok) {
