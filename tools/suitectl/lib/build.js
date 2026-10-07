@@ -77,8 +77,11 @@ function buildComponent(bundle, st) {
   const metaPath = path.join(cacheDir, 'meta.json');
   if (fs.existsSync(zipPath) && fs.existsSync(metaPath) && !st.dirty) {
     const meta = U.readJson(metaPath);
-    console.log(`  [缓存] ${st.name}@${st.version} @${st.commit.slice(0, 8)}`);
-    return meta;
+    if (meta.dirty === false) { // 同 commit 两种树：脏构建产物不得冒充干净构建命中缓存
+      console.log(`  [缓存] ${st.name}@${st.version} @${st.commit.slice(0, 8)}`);
+      return meta;
+    }
+    console.log(`  [重建] ${st.name}：该 commit 的缓存来自脏树构建，按干净树重建`);
   }
   console.log(`  [构建] ${st.name}@${st.version} @${st.commit.slice(0, 8)}${st.dirty ? '（脏工作树，绕过缓存）' : ''}`);
   if (!fs.existsSync(path.join(st.cwd, 'node_modules'))) {
