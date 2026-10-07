@@ -26,3 +26,7 @@
 	path = components/tabby-command-workbench
 	url = https://github.com/rookie0422/tabby-command-workbench.git
 	branch = main
+[submodule "reference/tabby"]
+	path = reference/tabby
+	url = https://github.com/Eugeny/tabby.git
+	shallow = true

@@ -113,4 +113,4 @@ cd components/<dir> && node scripts/smokeLoad.js   # WebViewer / HotkeyGuard / B
 
 ## 五、环境事实入口
 
-本机实例清单/端口现状/绝对路径/用户热键 → 用户级 tabby-debug skill 的 `ENVIRONMENT.md`（易变层，环境变化只更新它）。本仓相关：插件源码 `components/<dir>`、core 原件 `vendor/*.zip`（hash 见 `vendor/index.json`）、未压缩内置插件源 `resources/builtin-plugins/<包>/dist/index.js`（任意解包实例内可直接 grep）。
+本机实例清单/端口现状/绝对路径/用户热键 → 用户级 tabby-debug skill 的 `ENVIRONMENT.md`（易变层，环境变化只更新它）。本仓相关：插件源码 `components/<dir>`、**Tabby 核心源码 `reference/tabby`（shallow 子仓，与构建 core 同版——查核心实现的第一入口，`.ts` 原文可读）**、core 构建原件 `vendor/*.zip`（hash 见 `vendor/index.json`）、运行时形态参考 = 任意解包实例内 `resources/builtin-plugins/<包>/dist/index.js`（未压缩 dist，可 grep）。

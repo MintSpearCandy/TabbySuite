@@ -54,6 +54,23 @@ function ensureCoreZip(version) {
   return { version, file, sha256: sha, origin: e.origin };
 }
 
+// 参考源码一致性：reference/tabby 子仓应钉在与构建 core 相同的版本（开发参考，非构建输入——不一致仅警告）
+function checkReference (coreVersion) {
+  const refDir = path.join(P.root, 'reference', 'tabby');
+  if (!fs.existsSync(path.join(refDir, '.git'))) {
+    console.log('[reference] tabby 源码参考未检出（git submodule update --init reference/tabby）——不影响构建');
+    return;
+  }
+  const tag = U.gitOut(['-C', refDir, 'describe', '--tags', '--exact-match', 'HEAD'], { ok: true });
+  if (!tag) {
+    console.log('[reference] ⚠ reference/tabby 不在 tag 上（detached 漂移）——建议 checkout v' + coreVersion + ' 后父仓 commit');
+  } else if (tag !== `v${coreVersion}`) {
+    console.log(`[reference] ⚠ 参考源码钉在 ${tag}，构建 core 为 v${coreVersion}——建议重钉保持同版`);
+  } else {
+    console.log(`[reference] tabby 源码参考 @${tag} ✓`);
+  }
+}
+
 function buildComponent(bundle, st) {
   const cacheDir = path.join(P.cache, `${st.name}@${st.commit}`);
   const zipPath = path.join(cacheDir, `${st.name}-${st.version}.zip`);
@@ -143,6 +160,7 @@ function buildCommand(bundle) {
   console.log(`[build] tabby-suite ${bundle.core.version}-s${bundle.suite.serial}`);
   const core = ensureCoreZip(bundle.core.version);
   console.log(`[core] ${core.version} sha256=${core.sha256.slice(0, 12)}…`);
+  checkReference(bundle.core.version);
   const states = bundle.integrate.map(d => componentState(bundle, d));
   validateRules(bundle, states);
   const metas = states.map(st => buildComponent(bundle, st));

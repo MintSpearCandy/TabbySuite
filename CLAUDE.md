@@ -6,5 +6,6 @@ Tabby 集成总装仓库：core + 插件套件的构建 / 验证 / 发布 / 更�
 - 流水线：`node tools/suitectl/cli.js sync|build|verify|release`（verify/update/doctor 按 P2/P3 逐步落地）。
 - 产物在 `releases/`（zip 不入库；channel / SHA256SUMS / CHANGELOG 入库）；发布 = 父仓 tag `suite/<core>-s<serial>`。
 - 旧工作区 `D:\Home\Project\TabbyPlugins`（已停用，待重命名为 `TabbyPlugins.archive`：重命名时被进程占用，关闭占用窗口后 `mv` 即可）。
-- 远端：https://github.com/MintSpearCandy/TabbySuite（private）。**推送顺序：先子仓后父仓**——子仓 commit 未推送时父仓 gitlink 在别处不可解析。
+- 核心源码参考：`reference/tabby`（shallow 子仓，钉 v<core 版本>，build 校验同版；查核心内部实现优先读它，别 grep 解包 dist。未检出时 `git submodule update --init reference/tabby`）。
+- 远端：https://github.com/MintSpearCandy/TabbySuite（public）。**推送顺序：先子仓后父仓**——子仓 commit 未推送时父仓 gitlink 在别处不可解析。
 - 铁律：发布拒绝脏子仓；未过 verify 不出包（P2 起自动门禁）；core 官方 zip 永远原样分发。
