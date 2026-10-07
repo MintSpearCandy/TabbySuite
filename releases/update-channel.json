@@ -1,5 +1,5 @@
 {
-  "latest": "1.0.237-s2",
+  "latest": "1.0.237-s3",
   "releases": {
     "1.0.237-s1": {
       "core": "1.0.237",
@@ -78,6 +78,45 @@
       },
       "notes": "tabby-webviewer 0.4.9(dirty) @f5b32bd5; tabby-hotkey-guard 0.2.1 @b7eeb41e; tabby-glass-theme 0.4.0 @aa38bb14; tabby-output-filter 0.5.7 @2848afc7; tabby-better-configer 0.1.0(dirty) @893cbbc7; tabby-terminal-workwench 0.2.0 @8e40a38d",
       "releasedAt": "2026-10-07T12:58:45.884Z"
+    },
+    "1.0.237-s3": {
+      "core": "1.0.237",
+      "zip": "tabby-suite-1.0.237-s3-portable-x64.zip",
+      "sha256": "5f96dc31f9874f6b6e4c9b31069c9fdbaadf01e383d8aba3b486e5673a1aa43e",
+      "plugins": {
+        "tabby-webviewer": {
+          "version": "0.4.9",
+          "sha256": "97edb0f1c897d546947eacf030701f4abc443e1777dc880bf8bce720a6f3794f",
+          "dirty": true
+        },
+        "tabby-hotkey-guard": {
+          "version": "0.2.1",
+          "sha256": "625d38ac3f58d5f85e79dc012e016d7908b7e495c41f9c78326934147f28343e",
+          "dirty": false
+        },
+        "tabby-glass-theme": {
+          "version": "0.4.0",
+          "sha256": "b21409314d2e9f2e2092c7800e740a429fbd36703a2718361a5641441b91740d",
+          "dirty": false
+        },
+        "tabby-output-filter": {
+          "version": "0.5.7",
+          "sha256": "ef837549aa59c5885d478307a861668ee7caf80c08844193d933c284eeb7683b",
+          "dirty": false
+        },
+        "tabby-better-configer": {
+          "version": "0.1.0",
+          "sha256": "b6dcd77b7c116897f90e83e536a818abd3d3c1919604530db7be7aea37f31314",
+          "dirty": true
+        },
+        "tabby-terminal-workwench": {
+          "version": "0.2.0",
+          "sha256": "8ea58f5694a6cec13af541bb29797a5462d0ba6c1fe48588606f7b66be3d50da",
+          "dirty": false
+        }
+      },
+      "notes": "tabby-webviewer 0.4.9(dirty) @f5b32bd5; tabby-hotkey-guard 0.2.1 @b7eeb41e; tabby-glass-theme 0.4.0 @aa38bb14; tabby-output-filter 0.5.7 @2848afc7; tabby-better-configer 0.1.0(dirty) @893cbbc7; tabby-terminal-workwench 0.2.0 @8e40a38d",
+      "releasedAt": "2026-10-07T13:27:53.325Z"
     }
   }
 }
