@@ -55,7 +55,7 @@
 | **Suite（套件）** | 一次完整分发 = 官方 core portable + 插件集 + profile 种子配置。版本号 `<core>-s<serial>`（如 `1.0.237-s1`） |
 | **Component** | `components/<dir>` 的 git submodule 检出场 = 开发现场 + 集成输入，二者合一。其版本 = 父仓记录的 gitlink |
 | **规范工件** | 插件的统一产物形态：`{ sanitized package.json, dist/（子目录）, README }` + 版本化 zip。三种上游打包风格统一到它 |
-| **Profile** | `profiles/base/` 的 config 种子（禁用内置自动更新等），仅首次安装播种，此后归用户 |
+| **Profile** | `profiles/base/` 的 config 种子——**只含集成必需默认项**（主题选定、禁内置更新）；个人偏好（壁纸路径等）属用户态，不进仓。仅首次安装播种，此后归用户 |
 | **Channel** | `releases/update-channel.json`：发布侧版本索引（最新套件、每版组件清单+hash） |
 | **安装态** | 分发物内 `data/suite/suite.json`：已装套件版本、core/插件 hash——update/doctor/回滚的依据 |
 

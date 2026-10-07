@@ -1,12 +1,11 @@
 # TabbySuite profile 种子 —— 仅首次安装播种（assemble）；此后归用户所有，更新永不触碰。
+# 范围纪律：只放集成必需的默认项；个人偏好（壁纸路径等）属用户态，一律不进仓。
 application:
   # 禁用内置自动更新（R3，2026-10-07 实证：键被 Tabby 保留、无更新落盘；"Checking for updates" 日志仍会打）
   updateAutomatically: false
 
-# GlassTheme 是"不接管配置"的常规主题 —— 必须显式选中才生效（s1 回归根因，s2 起 profile 直接种子选定）
+# GlassTheme 是"不接管配置"的常规主题 —— 必须显式选中才生效（s1 回归根因，s2 起种子选定）
 appearance:
   theme: Glass
-
-# 壁纸走用户个人路径（与 main 实例一致）；文件缺失时主题优雅降级为纯渐变无壁纸
-glass:
-  wallpaper: 'D:\Data\图片\壁纸\HuTao\background.jpg'
+# 壁纸不种子化：留空时回退 <userData>/resources/background.jpg（无文件则纯渐变，优雅降级）；
+# 个人壁纸路径在外观设置里自设（写入用户 config，与仓库无关）
