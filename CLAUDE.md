@@ -6,6 +6,32 @@ Tabby 集成总装仓库：core + 插件套件的构建 / 验证 / 发布 / 更�
 - 流水线（双轨）：**开发轨** `suitectl dev up|deploy [--restart]|restart|down|status`（脏树迭代、长驻实例 runtime/dev、秒级单插件部署、永不产出 releases）；**构建轨** `suitectl sync|build|verify|release`（钉定+单测+门禁，update/doctor 为 P3）。
 - 硬链铁律：`core-cache → stage` 可硬链（永不执行）；**会运行的实例（dev/verify）必须实拷**——硬链共享文件锁，运行锁会波及打包。
 
+## 更新构建 SOP（远端插件有新版本时）
+
+```bash
+# ① 拉各子仓远端最新（脏树/feature 分支自动跳过并说明）
+node tools/suitectl/cli.js sync
+
+# ② 钉版：谁前进了 add 谁（一次多仓前进可一起），这就是"集成"动作
+git add components/<前进的仓> && git commit -m "chore(components): <仓> <版本>"
+
+# ③④ 构建 + 门禁（新 commit 重建并跑其单测，其余缓存命中；不出包可止步于此）
+node tools/suitectl/cli.js build
+node tools/suitectl/cli.js verify
+
+# ⑤ 出包（可选）：先递增 bundle.yaml 的 serial，再重跑 build+verify+release
+#    （serial 变了 build-report 版本要重新生成；release 三重门禁 + 打 tag suite/<ver>）
+node tools/suitectl/cli.js release
+
+# ⑥ 推送父仓（sync 拉来的子仓 commit 天然已在远端；本地开发才需先推子仓）
+git push origin main --tags
+
+# dev 实例同步看效果：单仓秒级；或 dev up 从新 stage 整体重建
+node tools/suitectl/cli.js dev deploy <仓> --restart
+```
+
+要点：reference/tabby 不随 sync 动（只随 core 版本重钉）；core 升级是独立流程（vendor 登记新 zip + bundle core.version + reference checkout v<新> + 父仓 commit）；verify 用自己的全新实例断言，dev 实例 config 属用户态可能漂移，别拿它判断种子链路。
+
 ## 克隆与拉取
 
 ```bash
