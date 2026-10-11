@@ -1,8 +1,8 @@
 # TabbySuite 架构设计（v0.5）
 
 > 定位：Tabby 集成总装项目 —— 版本集成、滚动更新、便携版打包的单一事实来源。
-> 形态：一个 git 仓库。7 个插件以 git submodule 收编在 `components/` 下，**开发直接在子仓内进行**（原 TabbyPlugins/ 归档退役）。
-> 远端：https://github.com/MintSpearCandy/TabbySuite（private）；7 子仓各自独立远端见 `.gitmodules`，互不侵入。
+> 形态：一个 git 仓库。8 个插件以 git submodule 收编在 `components/` 下，**开发直接在子仓内进行**（原 TabbyPlugins/ 归档退役）。
+> 远端：https://github.com/MintSpearCandy/TabbySuite（private）；8 子仓各自独立远端见 `.gitmodules`，互不侵入。
 > 版本纪律一句话：**父仓的 commit/tag 就是锁** —— 它钉死每个子仓的 gitlink 和 bundle.yaml，无需任何 lock 文件。
 
 ---
@@ -68,7 +68,7 @@
 外部源头（只读）                    TabbySuite 仓库（唯一事实来源）
 ──────────────────                ───────────────────────────────
 eugeny/tabby Releases ──► zip     bundle.yaml（core 版本 / serial / integrate 列表）
-components/* 各自 GitHub 远端      components/*（7 子仓，gitlink 钉版本，开发即在此）
+components/* 各自 GitHub 远端      components/*（8 子仓，gitlink 钉版本，开发即在此）
         │                                │
         ▼                                ▼
    vendor/（zip 缓存+hash）      suitectl build ──► cache/plugins/<pkg>@<commit>/（按 commit 缓存）
@@ -101,7 +101,7 @@ components/* 各自 GitHub 远端      components/*（7 子仓，gitlink 钉版�
 TabbySuite/
 ├─ ARCHITECTURE.md             # 本文档
 ├─ bundle.yaml                 # core 版本 / serial / integrate 列表（唯一人工配置）
-├─ .gitmodules                 # 7 子仓远端（统一 https；代理场景本地 url.insteadOf 覆写）
+├─ .gitmodules                 # 8 子仓远端（统一 https；代理场景本地 url.insteadOf 覆写）
 ├─ components/                 # 插件子仓 = 开发现场（node_modules 等由各子仓自身 .gitignore 管）
 │  ├─ WebViewer/  HotkeyGuard/  GlassTheme/  Filter/
 │  ├─ BetterConfiger/  TerminalWorkwench/
@@ -136,7 +136,7 @@ tabby-suite/                     # 解压到任意目录即可运行
 
 ### 6.1 components/：子仓即开发现场
 
-- 收编：`git submodule add <url> components/<dir>`（7 个，含第三方 tabby-command-workbench，checkout v1.2.5 后提交 gitlink，列入 exclude）。
+- 收编：`git submodule add <url> components/<dir>`（8 个，含第三方 tabby-command-workbench，checkout v1.2.5 后提交 gitlink，列入 exclude）。
 - **开发就在子仓里**：改码、commit、push 与普通仓库无异；父仓 `git add components/X && git commit` 即把该版本钉入套件——这就是"集成"的全部动作。
 - `suitectl sync` = 分支安全的远端快进：只对"检出在 .gitmodules 声明分支上的干净仓"做 `fetch + merge --ff-only`（在分支上）或 detached 前进；**feature 分支/脏树/游离检出一律跳过并说明**（杜绝 `update --remote` 静默挪走开发分支的隐患）。第三方 exclude 仓与 reference/tabby 不经 sync。
 - **缓存与复现**：规范工件缓存键 = `<pkg>@<gitlink commit>`；脏工作树不走缓存、直接重建，且 `release` 一律拒绝（原则 3）。

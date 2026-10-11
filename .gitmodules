@@ -30,3 +30,7 @@
 	path = reference/tabby
 	url = https://github.com/Eugeny/tabby.git
 	shallow = true
+[submodule "components/ActivxRDPClient"]
+	url = https://github.com/MintSpearCandy/tabby-activx-rdp-client.git
+	path = components/ActivxRDPClient
+	branch = main

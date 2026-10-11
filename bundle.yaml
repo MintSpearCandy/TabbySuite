@@ -5,12 +5,13 @@ core:
   version: 1.0.237               # 官方 portable 版本（vendor/index.json 取 zip）
 profile: base
 integrate:                       # 参与集成的子仓；版本 = 各自 gitlink（父仓 commit 即锁）
-  [WebViewer, HotkeyGuard, GlassTheme, Filter, BetterConfiger, TerminalWorkwench]
+  [WebViewer, HotkeyGuard, GlassTheme, Filter, BetterConfiger, TerminalWorkwench, ActivxRDPClient]
 exclude: [tabby-command-workbench]   # 已收编不集成（第三方，与 TerminalWorkwench 互斥）
 install:                         # npm install 覆盖（旧代工具链需放宽 peer 解析）
   WebViewer: { flags: [--legacy-peer-deps] }
   Filter: { flags: [--legacy-peer-deps] }
   HotkeyGuard: { flags: [--legacy-peer-deps] }
+  ActivxRDPClient: { flags: [--legacy-peer-deps] }
 probes:                          # verify ③：渲染层 CDP 探针（expr 求值结果须 === expect）
   GlassTheme:
     - { expr: "!!window.__glassConfig && !!document.querySelector('style#glass-vars')", expect: "true" }
