@@ -7,6 +7,8 @@ profile: base
 integrate:                       # 参与集成的子仓；版本 = 各自 gitlink（父仓 commit 即锁）
   [WebViewer, HotkeyGuard, GlassTheme, Filter, BetterConfiger, TerminalWorkwench, ActivxRDPClient]
 exclude: [tabby-command-workbench]   # 已收编不集成（第三方，与 TerminalWorkwench 互斥）
+payload:                         # 规范工件 {package.json, dist, README} 之外的附加载荷（目录/文件，随 zip 与 stage 同步）
+  ActivxRDPClient: [native]      # 含 rdp_host.node（prebuilt N-API addon）+ C++ 源码
 install:                         # npm install 覆盖（旧代工具链需放宽 peer 解析）
   WebViewer: { flags: [--legacy-peer-deps] }
   Filter: { flags: [--legacy-peer-deps] }

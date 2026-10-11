@@ -114,6 +114,15 @@ function buildComponent(bundle, st) {
       break;
     }
   }
+  // bundle.payload.<dir>：规范工件之外的附加载荷（目录或文件，如 native 二进制）
+  for (const rel of bundle.payload?.[st.dir] || []) {
+    const src = path.join(st.cwd, rel);
+    if (!fs.existsSync(src)) throw new Error(`${st.dir}: bundle.payload 路径不存在：${rel}`);
+    const dst = path.join(stageDir, rel);
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    if (fs.statSync(src).isDirectory()) fs.cpSync(src, dst, { recursive: true });
+    else fs.copyFileSync(src, dst);
+  }
   U.rmrf(zipPath);
   U.ps(`Compress-Archive -Path "${stageDir}\\*" -DestinationPath "${zipPath}" -Force`);
   const meta = {
