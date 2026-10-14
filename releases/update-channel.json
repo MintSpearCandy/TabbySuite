@@ -1,5 +1,5 @@
 {
-  "latest": "1.0.237-s4",
+  "latest": "1.0.237-s5",
   "releases": {
     "1.0.237-s1": {
       "core": "1.0.237",
@@ -156,6 +156,50 @@
       },
       "notes": "tabby-webviewer 0.4.9(dirty) @f5b32bd5; tabby-hotkey-guard 0.2.1 @b7eeb41e; tabby-glass-theme 0.4.0 @aa38bb14; tabby-output-filter 0.5.7 @2848afc7; tabby-better-configer 0.1.0(dirty) @893cbbc7; tabby-terminal-workwench 0.2.0 @8e40a38d",
       "releasedAt": "2026-10-07T14:38:56.446Z"
+    },
+    "1.0.237-s5": {
+      "core": "1.0.237",
+      "zip": "tabby-suite-1.0.237-s5-portable-x64.zip",
+      "sha256": "234ab988b3fb50f4a1a53b55d2b875e783c85ea82fc4f618af3072333346d5fa",
+      "plugins": {
+        "tabby-webviewer": {
+          "version": "0.4.10",
+          "sha256": "d13176bcdce1906219cec431a79f5be06d5ea4aa821ea0d2fe6567dbe9c17f0d",
+          "dirty": false
+        },
+        "tabby-hotkey-guard": {
+          "version": "0.2.1",
+          "sha256": "625d38ac3f58d5f85e79dc012e016d7908b7e495c41f9c78326934147f28343e",
+          "dirty": false
+        },
+        "tabby-glass-theme": {
+          "version": "0.5.0",
+          "sha256": "24a0d3bfb42a0a0fdc3b463dffbc5997ee20ac685cd50062256079d2030a4d70",
+          "dirty": false
+        },
+        "tabby-output-filter": {
+          "version": "0.5.7",
+          "sha256": "ef837549aa59c5885d478307a861668ee7caf80c08844193d933c284eeb7683b",
+          "dirty": false
+        },
+        "tabby-better-configer": {
+          "version": "0.2.0",
+          "sha256": "3a7da317c80acaa311e423b9f902a8718aa568db56c7688bb5d885af7c1cab78",
+          "dirty": false
+        },
+        "tabby-terminal-workwench": {
+          "version": "0.2.4",
+          "sha256": "fb6e9ae85c1c89fb45291ea691124838569662fb76be94aa2d03cf078f2e8d8b",
+          "dirty": false
+        },
+        "tabby-activx-rdp-client": {
+          "version": "0.1.0",
+          "sha256": "1dc1b0f0478852a47c8c0edba0af8faf199b0f9fc68841e9a14fdc863d78b58d",
+          "dirty": false
+        }
+      },
+      "notes": "tabby-webviewer 0.4.10 @6b0a450c; tabby-hotkey-guard 0.2.1 @b7eeb41e; tabby-glass-theme 0.5.0 @1dd26b29; tabby-output-filter 0.5.7 @2848afc7; tabby-better-configer 0.2.0 @c91787b9; tabby-terminal-workwench 0.2.4 @72e398ff; tabby-activx-rdp-client 0.1.0 @8e6fff0a",
+      "releasedAt": "2026-10-14T00:36:37.811Z"
     }
   }
 }
