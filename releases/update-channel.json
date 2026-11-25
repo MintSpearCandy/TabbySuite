@@ -1,5 +1,5 @@
 {
-  "latest": "1.0.237-s5",
+  "latest": "1.0.238-s1",
   "releases": {
     "1.0.237-s1": {
       "core": "1.0.237",
@@ -200,6 +200,80 @@
       },
       "notes": "tabby-webviewer 0.4.10 @6b0a450c; tabby-hotkey-guard 0.2.1 @b7eeb41e; tabby-glass-theme 0.5.0 @1dd26b29; tabby-output-filter 0.5.7 @2848afc7; tabby-better-configer 0.2.0 @c91787b9; tabby-terminal-workwench 0.2.4 @72e398ff; tabby-activx-rdp-client 0.1.0 @8e6fff0a",
       "releasedAt": "2026-10-14T00:36:37.811Z"
+    },
+    "1.0.238-s1": {
+      "core": "1.0.238",
+      "zip": "tabby-suite-1.0.238-s1-portable-x64.zip",
+      "sha256": "a5f666022e36bc2cf954142ee36cdcb57998375ce8ef99cafec600dbf264d795",
+      "plugins": {
+        "tabby-webviewer": {
+          "version": "0.4.14",
+          "commit": "94dcd57858db80e934016f169cf21f92426fd636",
+          "dirty": false,
+          "zip": "tabby-webviewer-0.4.14.zip",
+          "sha256": "397c6e7d03e5634f3eae1254e7e1d3e70d6500b78dbf8807f5dc5822c89ea4fb",
+          "treeSha256": "67e62ece1336e5f9ab391776ae4bd11f9bae834e4367eb688029b2314993e161"
+        },
+        "tabby-hotkey-guard": {
+          "version": "0.2.1",
+          "commit": "b7eeb41ee130e4c26bb33bd0e6ac16181a10c58f",
+          "dirty": false,
+          "zip": "tabby-hotkey-guard-0.2.1.zip",
+          "sha256": "bf357a6dd0364b2b1a44338bd70d85408b784ed900e9be5294115494ba692df0",
+          "treeSha256": "5d755891cb23c1c64b157707ad48e045f201d3754597d3d8ee62fb73af29c0df"
+        },
+        "tabby-glass-theme": {
+          "version": "0.5.0",
+          "commit": "1dd26b29845735a703d6e5a1d27a57832ebab24a",
+          "dirty": false,
+          "zip": "tabby-glass-theme-0.5.0.zip",
+          "sha256": "46f8bc0ec2c4107e09bf2fe5b2a79627ade2a9e7ce42f91f2eca74573ef88754",
+          "treeSha256": "3075f904950b2ccc4f4374217f3394c14fce4a6fe7d1c09947bbf5d2c71613c2"
+        },
+        "tabby-output-filter": {
+          "version": "0.5.7",
+          "commit": "2848afc7cbb2b13ae97ed8bfbbc6d01cc10f8a7c",
+          "dirty": false,
+          "zip": "tabby-output-filter-0.5.7.zip",
+          "sha256": "bc6ab617506dc7bd2b06f90c4ea771935b04f1a2eeed4ec7f2de77fc422f6529",
+          "treeSha256": "6256db46b653d3bf7dc4dcc44fe075346db3254a5c2a4fdd692462c7758ea05a"
+        },
+        "tabby-better-configer": {
+          "version": "0.3.0",
+          "commit": "d8fc0bd35e3418c0bd2d3deaab7e435020c43caf",
+          "dirty": false,
+          "zip": "tabby-better-configer-0.3.0.zip",
+          "sha256": "9f20c3cfea9b35e3de3c4f7d5a16d2620c28881759959b46366ae9632b54b905",
+          "treeSha256": "3b7d05286b42ca59bb5aed85fe470c872bea9620f77e3e771fde7db77843b1ac"
+        },
+        "tabby-terminal-workwench": {
+          "version": "0.2.4",
+          "commit": "72e398ff6a54cfc7b5539cd56aa61c35e132a108",
+          "dirty": false,
+          "zip": "tabby-terminal-workwench-0.2.4.zip",
+          "sha256": "64b6d0452a0d38d9880eb50e87b83d880786cbad660b8049992c3d57ff30c221",
+          "treeSha256": "a081bedaf228f34f530468658acb89ab52142dce9d3ec862706596c392f03d43"
+        },
+        "tabby-activx-rdp-client": {
+          "version": "0.1.0",
+          "commit": "4f53b56877a94c7b11eac39809722a41912280ca",
+          "dirty": false,
+          "zip": "tabby-activx-rdp-client-0.1.0.zip",
+          "sha256": "e044248ec1e4c84e3c497df2a62c6ea005abbee01c97b4a835c518d2910dbffd",
+          "treeSha256": "5d0f8b13eeef2c001784e397e67e067fe63147a627b7cb6b9547a4921832992c"
+        }
+      },
+      "notes": [
+        "tabby-webviewer 0.4.14 @94dcd578\n录制器 Network 页签：结构化 JSON 展示与请求内容搜索。\n\n## 新功能\n\n- **展开请求时的结构化 JSON**：请求体 / 响应体为 JSON（对象或数组）时，自动\n  美化缩进（2 空格）并做 token 着色——键名（青）、字符串（绿）、数字（琥珀）、\n  true/false/null（紫）；非 JSON 内容保持原文显示",
+        "tabby-hotkey-guard 0.2.1 @b7eeb41e",
+        "tabby-glass-theme 0.5.0 @1dd26b29",
+        "tabby-output-filter 0.5.7 @2848afc7",
+        "tabby-better-configer 0.3.0 @d8fc0bd3",
+        "tabby-terminal-workwench 0.2.4 @72e398ff\n- 设置页改为双 Tab 分页：「片段管理」（默认页，筛选/新建工具条 + 场景树）与「面板设置」（面板开关、毛玻璃、侧栏样式、搜索分组）。\n- 毛玻璃模糊独立开关（默认关闭）：关闭时快捷按钮不做模糊（模糊半径仅在开启时生效）；开启后显示模糊度调节行。\n- 默认配置调整（新装/未落盘用户）：侧边栏透明遮罩默认开启（透明度 0.03、底色灰色 #808080）；默认不启用侧边命令面板；启动时默认不展开。注意：旧数据中等于旧默认而被 ConfigProxy 擦除的项将按新默认呈现。",
+        "tabby-activx-rdp-client 0.1.0 @4f53b568"
+      ],
+      "releasedAt": "2026-11-25T17:01:44.706Z"
     }
-  }
+  },
+  "baseUrl": "https://github.com/MintSpearCandy/TabbySuite/releases/download"
 }
