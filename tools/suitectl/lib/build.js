@@ -1,27 +1,38 @@
 'use strict';
-// build：core zip 校验 → 各组件规范工件（按 commit 缓存）→ assemble 组装 stage
+// build：core zip 校验/获取 → 各组件规范工件（按 commit+配方 缓存）→ assemble 组装 stage。
+// v2 版本语义：serial 不再手维护 —— 候选版本 = <core>-s<该 core 在 channel 的最大 serial + 1>，
+//   release 落 channel 后下一次 build 自然 +1（"全浮动·发布即锁"）。
 const fs = require('fs');
 const path = require('path');
 const U = require('./util');
-const { P } = U;
-
-const SUITE_TOOL_PS1 = `param([string]$Command = 'info')
-# TabbySuite 随包精简工具（P3 将实现 update / rollback / doctor）
-$specPath = Join-Path $PSScriptRoot '..\\data\\suite\\suite.json'
-if (-not (Test-Path $specPath)) { Write-Error 'suite.json 缺失'; exit 1 }
-$spec = Get-Content $specPath -Raw | ConvertFrom-Json
-switch ($Command) {
-  'info' {
-    Write-Host "suiteVersion: $($spec.suiteVersion)"
-    Write-Host "core:         $($spec.core.version)"
-    foreach ($p in $spec.plugins.PSObject.Properties) { Write-Host "plugin:       $($p.Name) $($p.Value.version)" }
-  }
-  default { Write-Host "未知命令 $Command（当前仅 info；update/rollback/doctor 见 P3）" }
-}
-`;
+const platform = require('./platform');
+const vendor = require('./vendor');
+const { treeHash } = require('./hash');
+const { P, cfg } = require('./config');
 
 // 规范工件 package.json 只保留安装/发现所需字段（对齐各仓库 package.js 的做法）
 const SANITIZE_FIELDS = ['name', 'version', 'description', 'keywords', 'main', 'typings', 'author', 'license', 'peerDependencies'];
+
+// 候选套件版本：同 core 已发布过的最大 serial + 1（无历史则 s1）
+function candidateVersion(coreVersion) {
+  const ch = fs.existsSync(P.channel) ? U.readJson(P.channel) : null;
+  let max = 0;
+  for (const [v, r] of Object.entries(ch?.releases || {})) {
+    if (r?.core !== coreVersion) continue;
+    const m = /-s(\d+)$/.exec(v);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `${coreVersion}-s${max + 1}`;
+}
+
+// 缓存配方：bundle 中会影响产物的段落变了 → 同 commit 也必须重建（防陈旧缓存冒充）
+function recipeOf(bundle, st) {
+  return U.sha256Str(JSON.stringify({
+    payload: bundle.payload?.[st.dir] || [],
+    installFlags: bundle.install?.[st.dir]?.flags || [],
+    sanitize: SANITIZE_FIELDS,
+  }));
+}
 
 function componentState(bundle, dir) {
   const cwd = path.join(P.components, dir);
@@ -37,21 +48,30 @@ function componentState(bundle, dir) {
 
 function validateRules(bundle, states) {
   const names = new Set(states.map(s => s.name));
+  if (names.size !== states.length) throw new Error('integrate 中存在同名包（package.json name 冲突）——安装会相互覆盖');
   for (const pair of bundle.rules?.mutuallyExclusive || []) {
     const hit = pair.filter(n => names.has(n));
     if (hit.length > 1) throw new Error(`互斥组件同时启用: ${hit.join(' + ')}（bundle.yaml rules）`);
   }
 }
 
-function ensureCoreZip(version) {
-  const idx = U.readJson(P.vendorIndex);
-  const e = idx.zips?.[version];
-  if (!e) throw new Error(`vendor/index.json 未登记 core ${version}`);
-  const file = path.isAbsolute(e.file) ? e.file : path.join(P.vendor, e.file);
-  if (!fs.existsSync(file)) throw new Error(`core zip 不存在: ${file}${e.external ? '（外部登记路径，需手工放置）' : ''}`);
-  const sha = U.sha256(file);
-  if (e.sha256 && sha !== e.sha256) throw new Error(`core zip sha256 不符: ${file}`);
-  return { version, file, sha256: sha, origin: e.origin };
+// npm install 感知依赖变化：安装基线戳存 cache/install/<pkg>.json（不能放子仓内——会污染工作树致其"脏"）
+function ensureInstalled(bundle, st) {
+  const nm = path.join(st.cwd, 'node_modules');
+  const stampDir = path.join(P.cacheRoot, 'install');
+  const stampPath = path.join(stampDir, `${st.name}.json`);
+  const lock = path.join(st.cwd, 'package-lock.json');
+  const basis = U.sha256Str(JSON.stringify({
+    pkg: fs.readFileSync(path.join(st.cwd, 'package.json'), 'utf8'),
+    lock: fs.existsSync(lock) ? fs.readFileSync(lock, 'utf8') : null,
+    flags: bundle.install?.[st.dir]?.flags || [],
+  }));
+  const fresh = (() => { try { return U.readJson(stampPath).basis === basis; } catch { return false; } })();
+  if (fs.existsSync(nm) && fresh) return;
+  const flags = bundle.install?.[st.dir]?.flags ?? [];
+  console.log(`    npm install ${flags.join(' ')}`.trimEnd() + (fs.existsSync(nm) ? '（依赖基线已变）' : ''));
+  platform.npm(['install', '--no-audit', '--no-fund', ...flags], { cwd: st.cwd });
+  U.writeJson(stampPath, { basis, at: U.stamp() });
 }
 
 // 参考源码一致性：reference/tabby 子仓应钉在与构建 core 相同的版本（开发参考，非构建输入——不一致仅警告）
@@ -75,26 +95,24 @@ function buildComponent(bundle, st) {
   const cacheDir = path.join(P.cache, `${st.name}@${st.commit}`);
   const zipPath = path.join(cacheDir, `${st.name}-${st.version}.zip`);
   const metaPath = path.join(cacheDir, 'meta.json');
+  const recipe = recipeOf(bundle, st);
   if (fs.existsSync(zipPath) && fs.existsSync(metaPath) && !st.dirty) {
     const meta = U.readJson(metaPath);
-    if (meta.dirty === false) { // 同 commit 两种树：脏构建产物不得冒充干净构建命中缓存
+    // 同 commit 两种树/两种配方不得互冒：脏构建不冒充干净，旧配方不冒充新配方
+    if (meta.dirty === false && meta.recipe === recipe) {
       console.log(`  [缓存] ${st.name}@${st.version} @${st.commit.slice(0, 8)}`);
       return meta;
     }
-    console.log(`  [重建] ${st.name}：该 commit 的缓存来自脏树构建，按干净树重建`);
+    console.log(`  [重建] ${st.name}：缓存来自${meta.dirty ? '脏树' : '旧配方'}构建，按当前状态重建`);
   }
   console.log(`  [构建] ${st.name}@${st.version} @${st.commit.slice(0, 8)}${st.dirty ? '（脏工作树，绕过缓存）' : ''}`);
-  if (!fs.existsSync(path.join(st.cwd, 'node_modules'))) {
-    const flags = bundle.install?.[st.dir]?.flags ?? [];
-    console.log(`    npm install ${flags.join(' ')}`.trimEnd());
-    U.npm(['install', '--no-audit', '--no-fund', ...flags], { cwd: st.cwd });
-  }
-  U.npm(['run', 'build'], { cwd: st.cwd });
+  ensureInstalled(bundle, st);
+  platform.npm(['run', 'build'], { cwd: st.cwd });
   // 单测/冒烟（有则必跑，多仓并行开发的第一道互不影响防线）
   for (const script of ['test', 'smoke']) {
     if (st.pkg.scripts?.[script]) {
-      console.log(`    npm ${script}`);
-      U.npm(['run', script], { cwd: st.cwd });
+      console.log(`    npm run ${script}`);
+      platform.npm(['run', script], { cwd: st.cwd });
     }
   }
   // 规范化工件：{package.json, dist/(子目录！), README}
@@ -124,10 +142,10 @@ function buildComponent(bundle, st) {
     else fs.copyFileSync(src, dst);
   }
   U.rmrf(zipPath);
-  U.ps(`Compress-Archive -Path "${stageDir}\\*" -DestinationPath "${zipPath}" -Force`);
+  platform.zipDir(stageDir, zipPath); // zip 内带顶层 <pkg>/ 目录（更新器解包后取内层）
   const meta = {
-    dir: st.dir, name: st.name, version: st.version, commit: st.commit, dirty: st.dirty,
-    stageDir, zip: zipPath, zipSha256: U.sha256(zipPath), builtAt: U.stamp(),
+    dir: st.dir, name: st.name, version: st.version, commit: st.commit, dirty: st.dirty, recipe,
+    stageDir, zip: zipPath, zipName: path.basename(zipPath), zipSha256: U.sha256(zipPath), builtAt: U.stamp(),
   };
   U.writeJson(metaPath, meta);
   return meta;
@@ -141,63 +159,86 @@ function ensureCoreTree (core, dst) {
     console.log(`[core-cache] 解包 ${core.version}（zip sha256 ${core.sha256.slice(0, 12)}…）`);
     U.rmrf(cacheRoot);
     fs.mkdirSync(cacheRoot, { recursive: true });
-    U.ps(`Expand-Archive -LiteralPath "${core.file}" -DestinationPath "${cacheRoot}" -Force`);
+    platform.unzip(core.file, cacheRoot);
     fs.writeFileSync(marker, core.sha256);
   }
   U.cloneTree(cacheRoot, dst);
 }
 
-function assemble(bundle, metas, core) {
-  const ver = `${bundle.core.version}-s${bundle.suite.serial}`;
-  const suiteDir = path.join(P.stage, 'tabby-suite');
-  console.log(`\n[assemble] ${ver} → build/stage/tabby-suite/`);
-  U.rmrf(P.stage);
-  fs.mkdirSync(suiteDir, { recursive: true });
-  ensureCoreTree(core, suiteDir);
-  if (!fs.existsSync(path.join(suiteDir, 'Tabby.exe'))) throw new Error('core 解包后未见 Tabby.exe（zip 结构异常）');
-  // 插件装入 data/plugins/node_modules/<pkg>（dist 必须是子目录 —— 压平会破坏 main 解析）
-  const nm = path.join(suiteDir, 'data', 'plugins', 'node_modules');
-  fs.mkdirSync(nm, { recursive: true });
-  for (const m of metas) {
-    const dst = path.join(nm, m.name);
-    fs.cpSync(m.stageDir, dst, { recursive: true });
-    if (!fs.existsSync(path.join(dst, 'dist', 'index.js'))) throw new Error(`安装后校验失败: ${m.name}/dist/index.js 缺失`);
+// 构建态失效：assemble 半途而废时绝不能留旧的 build-report/.verify-passed 冒充"当前 stage 已构建/已验证"
+function invalidateBuildState() {
+  for (const f of [P.buildReport, path.join(P.build, '.verify-passed')]) {
+    try { fs.rmSync(f, { force: true }); } catch { /* 尽力 */ }
   }
-  // profile 种子（逐条拷入 data/）
-  const profileDir = path.join(P.profiles, bundle.profile || 'base');
-  const dataDir = path.join(suiteDir, 'data');
-  if (fs.existsSync(profileDir)) {
-    for (const f of fs.readdirSync(profileDir)) fs.cpSync(path.join(profileDir, f), path.join(dataDir, f), { recursive: true });
-  }
-  // suite-tools 随包精简工具
-  fs.mkdirSync(path.join(suiteDir, 'suite-tools'), { recursive: true });
-  fs.writeFileSync(path.join(suiteDir, 'suite-tools', 'suitectl.ps1'), SUITE_TOOL_PS1);
-  // 安装态清单 + build-report
-  const spec = {
-    suiteVersion: ver,
-    core: { version: core.version, sha256: core.sha256 },
-    plugins: Object.fromEntries(metas.map(m => [m.name, { version: m.version, sha256: m.zipSha256, commit: m.commit, dirty: m.dirty }])),
-    generatedAt: U.stamp(),
-  };
-  U.writeJson(path.join(dataDir, 'suite', 'suite.json'), spec);
-  U.writeJson(P.buildReport, {
-    ...spec,
-    stageDir: suiteDir,
-    coreFile: core.file,
-    components: metas.map(m => ({ dir: m.dir, name: m.name, version: m.version, commit: m.commit, dirty: m.dirty, sha256: m.zipSha256 })),
-  });
-  console.log(`[assemble] 完成：${metas.length} 插件已装入 data/plugins/node_modules/`);
 }
 
-function buildCommand(bundle) {
-  console.log(`[build] tabby-suite ${bundle.core.version}-s${bundle.suite.serial}`);
-  const core = ensureCoreZip(bundle.core.version);
+function assemble(bundle, ver, metas, core) {
+  const suiteDir = path.join(P.stage, 'tabby-suite');
+  console.log(`\n[assemble] ${ver} → ${path.relative(P.root, P.stage)}/tabby-suite/`);
+  try {
+    U.rmrf(P.stage);
+    fs.mkdirSync(suiteDir, { recursive: true });
+    ensureCoreTree(core, suiteDir);
+    platform.assertExe(suiteDir, 'core');
+    // 插件装入 data/plugins/node_modules/<pkg>（dist 必须是子目录 —— 压平会破坏 main 解析）
+    const nm = path.join(suiteDir, 'data', 'plugins', 'node_modules');
+    fs.mkdirSync(nm, { recursive: true });
+    for (const m of metas) {
+      const dst = path.join(nm, m.name);
+      fs.cpSync(m.stageDir, dst, { recursive: true }); // 实拷：会被执行的树不硬链
+      if (!fs.existsSync(path.join(dst, 'dist', 'index.js'))) throw new Error(`安装后校验失败: ${m.name}/dist/index.js 缺失`);
+    }
+    // profile 种子（逐条拷入 data/）
+    const profileDir = path.join(P.profiles, bundle.profile || 'base');
+    if (!fs.existsSync(profileDir)) throw new Error(`profile 种子目录不存在: ${profileDir}（bundle.yaml profile）`);
+    const dataDir = path.join(suiteDir, 'data');
+    for (const f of fs.readdirSync(profileDir)) fs.cpSync(path.join(profileDir, f), path.join(dataDir, f), { recursive: true });
+    // suite-tools 随包更新器（仓库内单一实现，CLI 的 update/doctor 也转调它）
+    fs.mkdirSync(path.join(suiteDir, 'suite-tools'), { recursive: true });
+    fs.copyFileSync(path.join(P.suiteTools, 'suitectl.ps1'), path.join(suiteDir, 'suite-tools', 'suitectl.ps1'));
+    // 安装态清单（更新器/doctor 的依据）+ build-report
+    const pluginSpec = {};
+    for (const m of metas) {
+      const dst = path.join(nm, m.name);
+      pluginSpec[m.name] = {
+        version: m.version, commit: m.commit, dirty: m.dirty,
+        zip: m.zipName, zipSha256: m.zipSha256, treeSha256: treeHash(dst),
+      };
+    }
+    const spec = {
+      suiteVersion: ver,
+      exe: platform.exeName(),
+      channel: `https://github.com/${cfg.dist.repo}/releases/latest/download/channel.json`,
+      core: { version: core.version, zipSha256: core.sha256, treeSha256: treeHash(suiteDir, { exclude: ['data'] }) },
+      plugins: pluginSpec,
+      generatedAt: U.stamp(),
+    };
+    U.writeJson(path.join(dataDir, 'suite', 'suite.json'), spec);
+    const stageTreeHash = treeHash(suiteDir);
+    U.writeJson(P.buildReport, {
+      ...spec,
+      stageDir: suiteDir,
+      stageTreeHash,
+      coreFile: core.file,
+      components: metas.map(m => ({ dir: m.dir, name: m.name, version: m.version, commit: m.commit, dirty: m.dirty, sha256: m.zipSha256, zip: m.zip, zipName: m.zipName })),
+    });
+    console.log(`[assemble] 完成：${metas.length} 插件已装入 data/plugins/node_modules/`);
+  } catch (e) {
+    invalidateBuildState();
+    throw e;
+  }
+}
+
+async function buildCommand(bundle, opts = {}) {
+  const ver = candidateVersion(bundle.core.version);
+  console.log(`[build] tabby-suite ${ver}（候选版本：serial 由 channel 派生）`);
+  const core = await vendor.ensureCoreZip(bundle.core.version, { offline: opts.offline });
   console.log(`[core] ${core.version} sha256=${core.sha256.slice(0, 12)}…`);
   checkReference(bundle.core.version);
   const states = bundle.integrate.map(d => componentState(bundle, d));
   validateRules(bundle, states);
   const metas = states.map(st => buildComponent(bundle, st));
-  assemble(bundle, metas, core);
+  assemble(bundle, ver, metas, core);
 }
 
-module.exports = { buildCommand, componentState, buildComponent, ensureCoreZip };
+module.exports = { buildCommand, componentState, buildComponent, candidateVersion, invalidateBuildState };

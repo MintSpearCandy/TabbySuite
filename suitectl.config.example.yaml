@@ -1,0 +1,40 @@
+# suitectl 环境配置示例（本机怎么跑）
+# ---------------------------------------------------------------------------
+# 用法：复制为 suitectl.local.yaml 后按需修改（该文件已 gitignore，不入库）。
+# 优先级：代码默认值 < suitectl.config.yaml（共享，可入库）< suitectl.local.yaml < TABBYSUITE_* 环境变量
+#
+# 分工：内容配置（core 版本 / integrate 列表 / probes / payload）在 bundle.yaml；
+#       本文件只放"本机怎么跑"——目录、端口、平台工具、代理。跨机共享的值不要写本机绝对路径。
+
+paths:                        # 相对仓库根，或任意绝对路径（可把构建/缓存目录移出仓库）
+  vendor: vendor              # core zip 存放目录；vendor/index.json 固定在仓库内
+  cache: cache
+  build: build
+  runtime: runtime
+  releases: releases
+
+platform:
+  # 可执行文件名（相对 core / 实例根）。默认按系统推断：
+  #   win32 = Tabby.exe · darwin = Tabby.app/Contents/MacOS/Tabby · linux = tabby
+  # exe: Tabby.exe
+  powershell: powershell.exe  # 进程管理/更新器依赖；也可写 pwsh
+  npmShell: cmd.exe           # Windows 上 npm 是 .cmd，需经 shell 调用
+
+ports:
+  cdp: [9241, 9268]           # CDP 端口候选区间；Windows 保留段因机而异，冲突时只改这里
+
+net:
+  # 外网代理（GitHub API / core zip 下载 / channel / gh 上传走它；null=直连）
+  # proxy: http://127.0.0.1:7892
+
+dist:
+  repo: MintSpearCandy/TabbySuite   # release 上传目标 + 更新器 channel 直链推导
+
+vendor:
+  autoDownload: true          # core zip 缺失时自动下载（sha256 校验/登记）
+  downloadTimeoutSec: 900
+
+# 等价的临时覆盖（环境变量，适合 CI/一次性验证）：
+#   TABBYSUITE_VENDOR / TABBYSUITE_CACHE / TABBYSUITE_BUILD / TABBYSUITE_RUNTIME / TABBYSUITE_RELEASES
+#   TABBYSUITE_CDP_RANGE="9241-9268"  TABBYSUITE_EXE  TABBYSUITE_POWERSHELL  TABBYSUITE_NPM_SHELL
+#   TABBYSUITE_PROXY=http://127.0.0.1:7892（空串=强制直连）  TABBYSUITE_REPO  TABBYSUITE_OFFLINE=1

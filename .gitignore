@@ -2,7 +2,14 @@ node_modules/
 cache/
 build/
 runtime/
+tmp/
+.tmp/
 vendor/*.zip
+vendor/*.zip.part
 releases/*.zip
 *.log
 releases/*/
+
+# 本机环境覆盖：不入库（跨机共享的默认值写 suitectl.config.yaml，示例见 suitectl.config.example.yaml）
+suitectl.local.yaml
+.suitectl/

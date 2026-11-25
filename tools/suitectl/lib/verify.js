@@ -1,29 +1,21 @@
 'use strict';
 // verify：stage 拷贝为隔离实例 → ELECTRON_ENABLE_LOGGING 启动 → 四级断言 → build/.verify-passed（release 门禁）
 // 断言依据 2026-10-07 实证：插件加载信号在 renderer console 的 "Loading <name>:" 行（tabby- 前缀被剥）；
-// CDP 端口必须 bind 探测（Windows 保留段动态变化，实测 9249-9348 曾整段不可绑）。
+// CDP 端口必须 bind 探测（Windows 保留段动态变化，实测 9249-9348 曾整段不可绑；候选区间见环境配置 ports.cdp）。
+// v2：.verify-passed 记 stageTreeHash —— release 压包前复核"verify 测的树 == 将要出包的树"。
 const fs = require('fs');
 const path = require('path');
-const net = require('net');
 const { spawn } = require('child_process');
 const U = require('./util');
+const platform = require('./platform');
+const { treeHash } = require('./hash');
+const { cfg } = require('./config');
 const { P } = U;
+const { candidateVersion } = require('./build');
 
 const BENIGN_ERR = [/jump_list/i]; // Windows 隐私设置花边；devtools 绑定失败不算良性（端口已探测过）
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-function probePort (cands) {
-  return new Promise(resolve => {
-    const tryNext = i => {
-      if (i >= cands.length) return resolve(null);
-      const s = net.createServer();
-      s.once('error', () => tryNext(i + 1));
-      s.listen(cands[i], '127.0.0.1', () => s.close(() => resolve(cands[i])));
-    };
-    tryNext(0);
-  });
-}
 
 async function waitCdp (port, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -37,59 +29,74 @@ async function waitCdp (port, timeoutMs) {
   return false;
 }
 
-// 最小 CDP 求值（Node 22+ 内置 WebSocket），与 TerminalWorkwench scripts/cdpEval.js 同构
+// 最小 CDP 求值（Node 22+ 内置 WebSocket），与 TerminalWorkwench scripts/cdpEval.js 同构；
+// 全链路 10s 超时——页面销毁/导航导致 evaluate 无响应时报错而非永挂
 async function cdpEval (port, expr) {
   const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
   const page = targets.filter(t => t.type === 'page').find(t => t.url.includes('index'));
   if (!page) throw new Error('CDP 无主窗口 target');
   const ws = new WebSocket(page.webSocketDebuggerUrl);
-  await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', rej); });
-  const r = await new Promise(res => {
-    ws.addEventListener('message', ev => {
-      const m = JSON.parse(ev.data);
-      if (m.id === 1) res(m);
+  const timeout = setTimeout(() => { try { ws.close(); } catch { /* 已关 */ } }, 10000);
+  try {
+    await new Promise((res, rej) => {
+      const t = setTimeout(() => rej(new Error('CDP 连接超时')), 5000);
+      ws.addEventListener('open', () => { clearTimeout(t); res(); });
+      ws.addEventListener('error', () => { clearTimeout(t); rej(new Error('CDP 连接失败')); });
     });
-    ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true } }));
-  });
-  ws.close();
-  const out = r.result?.result;
-  if (out?.subtype === 'error') return `ERROR: ${out.description?.slice(0, 300)}`;
-  return out?.value === undefined ? JSON.stringify(out) : String(out.value);
+    const r = await new Promise((res, rej) => {
+      const t = setTimeout(() => rej(new Error('CDP evaluate 超时')), 10000);
+      ws.addEventListener('message', ev => {
+        const m = JSON.parse(ev.data);
+        if (m.id === 1) { clearTimeout(t); res(m); }
+      });
+      ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true } }));
+    });
+    const out = r.result?.result;
+    if (out?.subtype === 'error') return `ERROR: ${out.description?.slice(0, 300)}`;
+    return out?.value === undefined ? JSON.stringify(out) : String(out.value);
+  } finally {
+    clearTimeout(timeout);
+    try { ws.close(); } catch { /* 已关 */ }
+  }
 }
 
 async function killInstance (instDir) {
-  // PS 单引号字符串中反斜杠是字面量，无需转义；按可执行文件路径过滤，绝不误杀其它 Tabby
-  U.ps(`Get-Process | Where-Object { $_.Path -like '${instDir}\\*' } | Stop-Process -Force`, { ok: true });
+  // 按可执行文件路径过滤，绝不误杀其它 Tabby；平台差异由 platform 适配
+  platform.killUnder(instDir);
 }
 
 async function verifyCommand (bundle) {
-  const ver = `${bundle.core.version}-s${bundle.suite.serial}`;
+  const ver = candidateVersion(bundle.core.version);
   if (!fs.existsSync(P.buildReport)) throw new Error('无 build-report —— 先 suitectl build');
   const report = U.readJson(P.buildReport);
-  if (report.suiteVersion !== ver) throw new Error(`build-report(${report.suiteVersion}) ≠ bundle(${ver}) —— serial 已变，重新 build`);
+  if (report.suiteVersion !== ver) throw new Error(`build-report(${report.suiteVersion}) ≠ 候选版本(${ver}) —— stage 已过期，重新 build`);
 
   const instDir = path.join(P.runtime, 'instance');
   const errFile = path.join(P.runtime, 'instance-boot.err');
-  console.log(`[verify] ${ver} → runtime/instance/（stage 全新拷贝）`);
+  console.log(`[verify] ${ver} → ${path.relative(P.root, instDir)}/（stage 全新实拷）`);
   U.rmrf(instDir);
   U.rmrf(errFile);
-  fs.cpSync(report.stageDir, instDir, { recursive: true });
+  fs.cpSync(report.stageDir, instDir, { recursive: true }); // 实拷：实例会执行，禁止硬链共享文件锁
 
-  const port = await probePort(Array.from({ length: 28 }, (_, i) => 9241 + i));
-  if (!port) throw new Error('9241-9268 全部不可绑定（netsh interface ipv4 show excludedportrange protocol=tcp 查保留段）');
+  const [from, to] = cfg.ports.cdp;
+  const port = await platform.probePort(platform.cdpPorts());
+  if (!port) throw new Error(`${from}-${to} 全部不可绑定（Windows 保留段随机器漂移：netsh interface ipv4 show excludedportrange protocol=tcp；可在 suitectl.local.yaml 的 ports.cdp 改区间）`);
   console.log(`[verify] CDP 端口 ${port}（bind 探测通过）`);
-  U.writeJson(path.join(P.runtime, 'instance.json'), {
+  // 实例自描述元数据放实例目录内（与 dev 实例/TabbyEnv 同构；拷走实例元数据随行）
+  U.writeJson(path.join(instDir, 'instance.json'), {
     name: 'verify', port, vendor: `suite ${ver}`,
-    created: new Date().toISOString(), notes: 'suitectl verify 隔离实例（schema 同 TabbyEnv）；失败保留现场',
+    created: new Date().toISOString(), notes: 'suitectl verify 隔离实例（自描述 instance.json）；失败保留现场',
   });
 
-  const child = spawn(path.join(instDir, 'Tabby.exe'), [`--remote-debugging-port=${port}`], {
+  platform.assertExe(instDir, 'verify 实例');
+  const child = spawn(platform.exePath(instDir), [`--remote-debugging-port=${port}`], {
     cwd: instDir,
     env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   let exited = false;
   child.on('exit', () => { exited = true; });
+  child.on('error', e => { throw new Error(`实例启动失败: ${e.message}`); });
   child.stderr.on('data', d => fs.appendFileSync(errFile, d));
 
   try {
@@ -100,9 +107,9 @@ async function verifyCommand (bundle) {
 
     const log = fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf8') : '';
 
-    // ① 插件全载：renderer console 每组件至少一条 "Loading <name>:"（Tabby 剥 tabby- 前缀）
+    // ① 插件全载：renderer console 每组件至少一条 "Loading <name>:"（Tabby 剥 tabby- 前缀；包名按字面匹配）
     const missing = report.components
-      .filter(c => !new RegExp(`Loading ${c.name.replace(/^tabby-/, '')}:`).test(log))
+      .filter(c => !new RegExp(`Loading ${U.escapeRe(c.name.replace(/^tabby-/, ''))}:`).test(log))
       .map(c => c.name);
     if (missing.length) throw new Error(`① 插件未加载: ${missing.join(', ')}（Loading 行缺失，现场保留于 runtime/）`);
     console.log(`[verify] ① 插件全载 ${report.components.length}/${report.components.length} ✓`);
@@ -130,7 +137,9 @@ async function verifyCommand (bundle) {
       U.run('node', [r.script], { cwd: path.join(P.components, r.cwd || dir), env: { ...process.env, CDP_PORT: String(port) } });
     }
 
-    U.writeJson(path.join(P.build, '.verify-passed'), { suiteVersion: ver, port, at: U.stamp() });
+    U.writeJson(path.join(P.build, '.verify-passed'), {
+      suiteVersion: ver, stageTreeHash: report.stageTreeHash, port, at: U.stamp(),
+    });
     console.log('[verify] ✓ 全部断言通过 —— build/.verify-passed 已写（release 门禁）');
   } finally {
     await killInstance(instDir);
@@ -139,4 +148,4 @@ async function verifyCommand (bundle) {
   }
 }
 
-module.exports = { verifyCommand, probePort, waitCdp, killInstance };
+module.exports = { verifyCommand, waitCdp, killInstance, cdpEval };

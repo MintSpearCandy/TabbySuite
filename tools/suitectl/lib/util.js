@@ -1,34 +1,36 @@
 'use strict';
-// suitectl 通用原语：路径表、进程封装、hash、JSON/FS 助手
+// suitectl 通用原语：进程封装、hash、JSON/FS 助手、版本比较。
+// 路径表与环境配置在 config.js；平台相关能力（tar/curl/PowerShell/npm/进程）在 platform.js。
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
+const { ROOT, P, cfg } = require('./config');
 
-const ROOT = path.resolve(__dirname, '..', '..', '..');
-const P = {
-  root: ROOT,
-  bundle: path.join(ROOT, 'bundle.yaml'),
-  components: path.join(ROOT, 'components'),
-  profiles: path.join(ROOT, 'profiles'),
-  vendor: path.join(ROOT, 'vendor'),
-  vendorIndex: path.join(ROOT, 'vendor', 'index.json'),
-  cache: path.join(ROOT, 'cache', 'plugins'),
-  build: path.join(ROOT, 'build'),
-  stage: path.join(ROOT, 'build', 'stage'),
-  buildReport: path.join(ROOT, 'build', 'build-report.json'),
-  runtime: path.join(ROOT, 'runtime'),
-  releases: path.join(ROOT, 'releases'),
-  channel: path.join(ROOT, 'releases', 'update-channel.json'),
-};
+// 代理一等公民：net.proxy 配置时对所有子进程注入标准代理环境变量——
+// git（libcurl 认 HTTPS_PROXY）、curl、gh 全部生效；本地回环排除（CDP 等）。
+function childEnv(override) {
+  if (override) return override;
+  if (!cfg.net.proxy) return process.env;
+  return {
+    ...process.env,
+    HTTPS_PROXY: cfg.net.proxy,
+    HTTP_PROXY: cfg.net.proxy,
+    NO_PROXY: process.env.NO_PROXY || 'localhost,127.0.0.1',
+  };
+}
 
 function run(file, args, opts = {}) {
   const r = spawnSync(file, args, {
     cwd: opts.cwd || ROOT,
     stdio: opts.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-    env: opts.env || process.env,
+    env: childEnv(opts.env),
     maxBuffer: 64 * 1024 * 1024,
   });
+  if (r.error) {
+    // spawn 本身失败（命令不存在等）——给可行动诊断而非裸 status:null
+    throw new Error(`无法执行 ${file}: ${r.error.message}（PATH 中不存在？suitectl env 可预检）`);
+  }
   if (r.status !== 0 && !opts.ok) {
     const err = (r.stderr && r.stderr.toString()) || '';
     throw new Error(`命令失败(${r.status}): ${file} ${args.join(' ')}\n${err.trim()}`);
@@ -41,13 +43,6 @@ function out(file, args, opts = {}) {
   return (r.stdout || '').toString().trim();
 }
 
-// Windows 上 npm 是 .cmd，不能直接 spawn
-function npm(args, opts = {}) {
-  if (process.platform === 'win32') return run('cmd.exe', ['/d', '/s', '/c', `npm ${args.join(' ')}`], opts);
-  return run('npm', args, opts);
-}
-
-function ps(command, opts = {}) { return run('powershell', ['-NoProfile', '-Command', command], opts); }
 function git(args, opts = {}) { return run('git', args, opts); }
 function gitOut(args, opts = {}) { return out('git', args, opts); }
 
@@ -60,6 +55,8 @@ function sha256(file) {
   fs.closeSync(fd);
   return h.digest('hex');
 }
+
+function sha256Str(s) { return crypto.createHash('sha256').update(s, 'utf8').digest('hex'); }
 
 function readJson(f) { return JSON.parse(fs.readFileSync(f, 'utf8')); }
 function writeJson(f, o) {
@@ -94,4 +91,28 @@ function cloneTree (src, dst) {
   }
 }
 
-module.exports = { P, run, out, npm, ps, git, gitOut, sha256, readJson, writeJson, rmrf, stamp, cloneTree };
+function escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// 点分版本比较（1.0.238 > 1.0.237 > 1.0.237-s3 的 serial 段不在此处理）
+function cmpSemver(a, b) {
+  const ai = String(a).split('.').map(Number), bi = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(ai.length, bi.length); i++) {
+    const d = (ai[i] || 0) - (bi[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+// 套件版本（<core>-s<serial>）比较：core 段点分比较优先，serial 数值次之
+function cmpSuiteVer(a, b) {
+  const [ac, as] = String(a).split('-s');
+  const [bc, bs] = String(b).split('-s');
+  const c = cmpSemver(ac, bc);
+  if (c) return c;
+  return (Number(as) || 0) - (Number(bs) || 0);
+}
+
+module.exports = {
+  P, run, out, git, gitOut, sha256, sha256Str, readJson, writeJson, rmrf, stamp,
+  cloneTree, escapeRe, cmpSemver, cmpSuiteVer,
+};

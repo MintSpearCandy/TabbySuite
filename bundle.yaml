@@ -1,10 +1,10 @@
 suite:
   name: tabby-suite
-  serial: 5                      # 发布序号，出包时递增
 core:
-  version: 1.0.237               # 官方 portable 版本（vendor/index.json 取 zip）
+  version: 1.0.238        # 当前构建 core（pin:auto 时 up 自动前进并回写此处；随 release 钉定落库）
+  pin: auto               # auto=跟随官方最新 | 写死版本=锁定不自动前进
 profile: base
-integrate:                       # 参与集成的子仓；版本 = 各自 gitlink（父仓 commit 即锁）
+integrate:                       # 参与集成的子仓；日常浮动（sync 拉最新直接构建），发布时 release 钉定 gitlink
   [WebViewer, HotkeyGuard, GlassTheme, Filter, BetterConfiger, TerminalWorkwench, ActivxRDPClient]
 exclude: [tabby-command-workbench]   # 已收编不集成（第三方，与 TerminalWorkwench 互斥）
 payload:                         # 规范工件 {package.json, dist, README} 之外的附加载荷（目录/文件，随 zip 与 stage 同步）

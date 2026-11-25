@@ -1,323 +1,264 @@
-# TabbySuite 架构设计（v0.5）
+# TabbySuite 架构设计（v1.0 · v2 重构）
 
 > 定位：Tabby 集成总装项目 —— 版本集成、滚动更新、便携版打包的单一事实来源。
-> 形态：一个 git 仓库。8 个插件以 git submodule 收编在 `components/` 下，**开发直接在子仓内进行**（原 TabbyPlugins/ 归档退役）。
-> 远端：https://github.com/MintSpearCandy/TabbySuite（private）；8 子仓各自独立远端见 `.gitmodules`，互不侵入。
-> 版本纪律一句话：**父仓的 commit/tag 就是锁** —— 它钉死每个子仓的 gitlink 和 bundle.yaml，无需任何 lock 文件。
+> 形态：一个 git 仓库。8 个插件以 git submodule 收编在 `components/` 下，**开发直接在子仓内进行**。
+> 远端：https://github.com/MintSpearCandy/TabbySuite（public）；子仓各自独立远端见 `.gitmodules`。
+> 版本纪律一句话（v2 · 全浮动·发布即锁）：**日常零 commit——`up` 一键拉最新并构建；`release` 才上锁——自动钉定 gitlink + tag，任意历史版本可冷复原**。
 
 ---
 
 ## 0. 设计原则（精简 · 直观 · 可靠）
 
-1. **父仓即锁**：`git clone --recursive && git checkout <tag>` 得到完全确定的构建输入。没有 lock 文件、没有双状态、没有"漂移"问题。
+1. **全浮动·发布即锁**：`up` = sync 子仓最新 + core 查新 + build + verify，不要求任何 commit；serial 由 channel 派生（同 core 已发布最大 serial + 1），全自动。`release` 把当时的检出态钉进父仓 commit + tag `suite/<ver>`——可复现性由发布点保障，日常迭代零负担。
 2. **目录即清单**：`components/` 里有什么、`integrate:` 列了什么，就集成什么。
-3. **干净才能发布**：`release` 拒绝脏子仓（本地试验走 build，发布必须落 commit）。
-4. **绿了才能出包**：verify 不通过，release 拒绝执行。
-5. **每个边界有 hash**：下载、缓存命中、安装、doctor 全程 SHA256 校验。
-6. **更新只有一条判断规则**：core 变了 → 整包换；core 没变 → 只换插件目录。
-7. **开发与构建分离**：dev 族（长驻实例、脏树、秒级单插件部署）与 build/release 族（钉定、单测、门禁）互不越界——dev 永不产出 releases；硬链接只用于永不执行的树（core-cache→stage），会运行的实例一律实拷。
+3. **干净才能发布**：`release` 拒绝脏子仓（钉的是 commit，不是工作树；本地试验走 build/dev）。
+4. **绿了才能出包 + 测啥压啥**：verify 不通过 release 拒绝；`.verify-passed` 记录 stage 树 hash，release 压包前复核——verify 测的树 == 将要出包的树。
+5. **每个边界有 hash**：下载（zip sha256）、安装态（每插件 + core 的目录树 treeSha256）、doctor 全程校验。
+6. **更新只有一条判断规则**：core 变了 → 整包换（rename dance）；core 没变 → 只换插件目录。
+7. **开发与构建分离**：dev 族（长驻实例、脏树、秒级单插件部署）与 build/release 族互不越界——dev 永不产出 releases；硬链接只用于永不执行的树（core-cache→stage），会运行的实例一律实拷。
+8. **内容配置与环境配置分离**：`bundle.yaml` 只描述"构建什么"；"本机怎么跑"（目录、端口、平台工具、**代理**）归环境配置层——默认值 ← `suitectl.config.yaml`（共享）← `suitectl.local.yaml`（本机，gitignore）← `TABBYSUITE_*` 环境变量。换机器不需要改仓库内容。
+9. **系统工具优先，零重依赖**：打包/解包用系统 tar（Windows System32 bsdtar / macOS bsdtar；Linux 检测回退 unzip/zip），下载用系统 curl（`-x` 原生代理——Node fetch 不认 HTTP_PROXY，绕开）；依赖仅 `js-yaml`。
 
 ---
 
-## 1. 背景与问题
-
-### 1.1 现状盘点（2026-10-06 实测）
-
-| 层 | 现状 |
-|---|---|
-| 插件仓库 ×7 | `TabbyPlugins\{WebViewer, HotkeyGuard, GlassTheme, Filter, BetterConfiger, TerminalWorkwench, tabby-command-workbench}`，全部独立 git 仓库（GitHub 远端；command-workbench 为第三方 rookie0422） |
-| 打包方式 ×3 | ① zip 流水线（WebViewer / Filter / BetterConfiger：`scripts/package.js`）② 无 zip（HotkeyGuard 只 stage 目录；GlassTheme 仓库根手工产物）③ npm tgz（TerminalWorkwench / command-workbench） |
-| 工具链 ×2 代 | 旧代（WebViewer / Filter / HotkeyGuard：TS 4.2 + Angular 7 devDeps）与新代（其余：TS 4.9–5.4 + Angular 15）并存；tabby-core devDeps 锁定不一（exact / caret / `*`） |
-| 核心来源 | 官方便携版 zip（eugeny/tabby GitHub Releases）；`D:\Env\TabbyEnv\` 已缓存 1.0.234/235/237（167–186 MB/个） |
-| 调试环境 | `D:\Env\TabbyEnv\instances\{main,wv,bc,twx}`，自描述 `instance.json`（name/port/vendor），CDP 端口 9231 起分配 |
-| 真实安装 | `D:\App\Tabby`（keygen/electron-updater 自动更新 core，见 `resources\app-update.yml`——与自管更新冲突，需禁用） |
-
-### 1.2 痛点
-
-1. 无统一版本视图："哪个 core × 哪组插件被验证过可共存"只存在于人脑记录。
-2. 打包不统一：出一份全家桶便携版要手工跑 3 套流程；`package:install` 在 4 仓库行为不一致（Filter 硬编码 `~/.taby/plugins`），3 仓库缺失。
-3. 更新纯手工：内置 updater 只管 core 不管插件；插件升级靠拷贝，无回滚。
-4. 分发不可复现、无校验。
-
----
-
-## 2. 目标与非目标
-
-**目标**：G1 版本集成（一份清单+流水线产出可复现套件）；G2 滚动更新（自管、可回滚）；G3 便携打包（解压即用 zip + 校验）；G4 复用现有资产（TabbyEnv instance 模式、各仓库 smoke/回归脚本）。
-
-**非目标**：不做插件市场；不改 Tabby core 本体（asar 不动）；无对外 CI/CD（本地优先）；不做插件热更新（插件双进程加载，"滚动"= 分阶段+可回滚，非热替换）。
-
----
-
-## 3. 核心概念
-
-| 概念 | 定义 |
-|---|---|
-| **Suite（套件）** | 一次完整分发 = 官方 core portable + 插件集 + profile 种子配置。版本号 `<core>-s<serial>`（如 `1.0.237-s1`） |
-| **Component** | `components/<dir>` 的 git submodule 检出场 = 开发现场 + 集成输入，二者合一。其版本 = 父仓记录的 gitlink |
-| **规范工件** | 插件的统一产物形态：`{ sanitized package.json, dist/（子目录）, README }` + 版本化 zip。三种上游打包风格统一到它 |
-| **Profile** | `profiles/base/` 的 config 种子——**只含集成必需默认项**（主题选定、禁内置更新）；个人偏好（壁纸路径等）属用户态，不进仓。仅首次安装播种，此后归用户 |
-| **Channel** | `releases/update-channel.json`：发布侧版本索引（最新套件、每版组件清单+hash） |
-| **安装态** | 分发物内 `data/suite/suite.json`：已装套件版本、core/插件 hash——update/doctor/回滚的依据 |
-
----
-
-## 4. 总体架构
+## 1. 总体架构
 
 ```
-外部源头（只读）                    TabbySuite 仓库（唯一事实来源）
-──────────────────                ───────────────────────────────
-eugeny/tabby Releases ──► zip     bundle.yaml（core 版本 / serial / integrate 列表）
-components/* 各自 GitHub 远端      components/*（8 子仓，gitlink 钉版本，开发即在此）
-        │                                │
-        ▼                                ▼
-   vendor/（zip 缓存+hash）      suitectl build ──► cache/plugins/<pkg>@<commit>/（按 commit 缓存）
-                │                       │
-                └───────► build/stage/<suite>/（官方 zip 原样 + 规范插件 + profile 种子 + suite.json）
-                                        │
-                                suitectl verify（隔离实例：boot + 插件全载断言 + 可选回归）
-                                        │ 绿
-                                suitectl release ──► 父仓 tag suite/<ver> + releases/
-                                        │                （zip + SHA256SUMS + update-channel.json + CHANGELOG）
-                                suitectl update / doctor（目标机：更新 + 回滚 + 完整性核对）
+外部源头（只读）                      TabbySuite 仓库（唯一事实来源）
+──────────────────                  ───────────────────────────────
+Eugeny/tabby Releases ─► vendor/    bundle.yaml（core 版本与 pin / integrate 列表）
+  （GitHub API 查最新，               components/*（8 子仓，gitlink；日常浮动，release 钉定）
+   下载+sha256+自动登记）                   │
+components/* 各自 GitHub 远端               ▼
+        │                          suitectl up ──► cache/plugins/<pkg>@<commit>/（按 commit+配方 缓存）
+        └── sync（分支安全快进）                    │
+                                                  ▼
+                                    build/stage/tabby-suite/（官方 zip 原样 + 规范插件 + profile 种子 + suite.json）
+                                          │
+                                  suitectl verify（隔离实例：boot + 插件全载断言 + 探针 + 回归挂钩；
+                                                   .verify-passed 绑定 stage 树 hash）
+                                          │ 绿
+                                  suitectl release ──► 发布即锁（gitlink+bundle+releases → commit + tag）
+                                          │             + releases/（zip + 插件 zip + SHA256SUMS + channel + CHANGELOG）
+                                          │             + 上传 GitHub Releases（gh；资产含 channel.json）
+                                          ▼
+                                  目标机 suite-tools/suitectl.ps1（check / apply / rollback / doctor）
+                                    插件级：下载变化插件 zip → sha256 → 原子换名（.backup 可回滚）
+                                    core 级：全量 zip → .staging → rename dance（data/ 保留，.old 可回滚）
 ```
 
 **日常回路（直观版）**：
 
 ```
-改代码（components/X 内）→ 子仓 git commit → 父仓 git add components/X && git commit（= 完成一次集成钉版）
-→ suitectl build → suitectl verify → suitectl release
-
-拉各远端最新：suitectl sync（submodule update --remote + 变更摘要）→ 父仓 commit gitlink → build …
+改代码（components/X 内）→ 子仓 git commit → suitectl up（一键：sync+build+verify）→ dev deploy 看效果
+发布：suitectl release（自动钉定子仓 gitlink + bundle + tag + 上传）
+目标机：suitectl.ps1 check → apply → （必要时）rollback
 ```
 
 ---
 
-## 5. 目录结构
+## 2. 目录结构
 
-### 5.1 项目（TabbySuite 仓库）
+### 2.1 项目（TabbySuite 仓库）
 
 ```
 TabbySuite/
-├─ ARCHITECTURE.md             # 本文档
-├─ bundle.yaml                 # core 版本 / serial / integrate 列表（唯一人工配置）
-├─ .gitmodules                 # 8 子仓远端（统一 https；代理场景本地 url.insteadOf 覆写）
-├─ components/                 # 插件子仓 = 开发现场（node_modules 等由各子仓自身 .gitignore 管）
-│  ├─ WebViewer/  HotkeyGuard/  GlassTheme/  Filter/
-│  ├─ BetterConfiger/  TerminalWorkwench/
-│  └─ tabby-command-workbench/ # 第三方，exclude，pinned v1.2.5
-├─ reference/tabby/            # Tabby 核心源码参考（shallow submodule，钉 v<core 版本>；不参与 integrate）
-├─ profiles/base/              # config 种子 + 预置资源
-├─ tools/                      # suitectl CLI（Node，依赖仅 js-yaml）
-├─ vendor/                     # 官方 core portable zip 缓存 + index.json（hash/origin）
-├─ cache/                      # 规范工件缓存 cache/plugins/<pkg>@<commit>/（gitignore）
-├─ build/                      # assemble 暂存（gitignore）
-├─ runtime/                    # verify 隔离实例（instance.json 兼容 TabbyEnv；gitignore）
-└─ releases/                   # 产物 zip + SHA256SUMS + update-channel.json + CHANGELOG.md
+├─ README.md / ARCHITECTURE.md / CLAUDE.md   # 使用说明（使用者入口） / 本文档 / 工作手册
+├─ bundle.yaml                   # 内容配置：core 版本与 pin / integrate / payload / probes / regression / rules
+├─ suitectl.config.example.yaml  # 环境配置示例（复制为 suitectl.local.yaml；路径/端口/平台/代理）
+├─ .gitmodules                   # 8 插件子仓 + reference/tabby（shallow）远端
+├─ components/                   # 插件子仓 = 开发现场（8 个；7 integrate + 1 exclude）
+├─ reference/tabby/              # Tabby 核心源码参考（shallow，钉 v<core 版本>；core 前进时自动重钉）
+├─ profiles/base/                # config 种子 + 预置资源
+├─ suite-tools/suitectl.ps1      # 目标机更新器（单一实现；CLI 的 update/doctor 转调；assemble 拷入分发物）
+├─ tools/suitectl/               # CLI（Node ≥22，依赖仅 js-yaml）
+│  └─ lib/（config/platform/util/hash/vendor/core/sync/build/verify/release/up/rollout/update/dev/env）
+├─ vendor/                       # 官方 core zip 缓存 + index.json（file/sha256/origin；新版本自动登记）
+├─ cache/                        # 工件缓存 cache/plugins/<pkg>@<commit>/ + install/ 安装基线戳（gitignore）
+├─ build/                        # stage / core-cache / build-report / .verify-passed（gitignore）
+├─ runtime/                      # verify（runtime/instance）与 dev（runtime/dev）隔离实例（gitignore）
+└─ releases/                     # zip + 插件 zip + SHA256SUMS + update-channel.json + CHANGELOG.md
 ```
 
-### 5.2 分发 zip（解压即用，flat 便携布局）
+### 2.2 分发 zip（tar 引擎，带顶层目录）
 
 ```
-tabby-suite/                     # 解压到任意目录即可运行
-├─ Tabby.exe / resources/ …      # 官方便携版原样，一字不动
-├─ suite-tools/                  # suitectl.ps1（update / rollback / doctor 精简入口）
-└─ data/                         # userData（portable 语义）
-   ├─ config.yaml                # profile 种子（仅首次播种）
-   ├─ suite/suite.json           # 安装态清单
-   └─ plugins/node_modules/<pkg>/# 规范工件（package.json + dist/ 子目录 + README）
+tabby-suite-<core>-s<serial>-portable-x64.zip
+└─ tabby-suite/                  # 解压出独立目录
+   ├─ Tabby.exe / resources/ …   # 官方便携版原样，一字不动
+   ├─ suite-tools/suitectl.ps1   # 更新器（check/apply/rollback/doctor）
+   └─ data/                      # userData（portable 语义）
+      ├─ config.yaml             # profile 种子（仅首次播种，此后归用户）
+      ├─ suite/suite.json        # 安装态清单（含每插件/core 的 treeSha256——doctor 依据）
+      └─ plugins/node_modules/<pkg>/   # 规范工件（package.json + dist/ 子目录 + README [+ payload]）
 ```
 
 **归属规则**：updater 拥有 = `data/` 以外的全部 + `data/plugins/node_modules/<受管包>` + `data/suite/`；用户拥有 = `config.yaml`（播种后）、会话、热键等其余 userData，更新永不触碰。
 
 ---
 
-## 6. 模块设计
+## 3. 模块设计
 
-### 6.1 components/：子仓即开发现场
+### 3.1 版本策略（v2 核心：全浮动·发布即锁）
 
-- 收编：`git submodule add <url> components/<dir>`（8 个，含第三方 tabby-command-workbench，checkout v1.2.5 后提交 gitlink，列入 exclude）。
-- **开发就在子仓里**：改码、commit、push 与普通仓库无异；父仓 `git add components/X && git commit` 即把该版本钉入套件——这就是"集成"的全部动作。
-- `suitectl sync` = 分支安全的远端快进：只对"检出在 .gitmodules 声明分支上的干净仓"做 `fetch + merge --ff-only`（在分支上）或 detached 前进；**feature 分支/脏树/游离检出一律跳过并说明**（杜绝 `update --remote` 静默挪走开发分支的隐患）。第三方 exclude 仓与 reference/tabby 不经 sync。
-- **缓存与复现**：规范工件缓存键 = `<pkg>@<gitlink commit>`；脏工作树不走缓存、直接重建，且 `release` 一律拒绝（原则 3）。
-- core 分发不子仓化（官方 portable zip 原样，自建 Electron 成本高收益为负），但**源码以 `reference/tabby` 浅子仓钉定**（v<core 版本>，build 校验同版一致性）供开发参考——查核心实现读 `.ts` 原文，而非 grep 解包实例里的 dist。
+- **候选版本** = `<core>-s<serial>`，serial = 本地 channel 中该 core 已发布最大 serial + 1（无历史则 1）。build/verify/release 全用候选号；release 写 channel 后下一次 build 自然 +1。tag 冲突预检兜底 serial 回退（本地 channel 丢失时）。
+- **浮动**：`sync` 后子仓 detached/分支于远端 tip，父仓 gitlink 漂移是**常态而非错误**——`build` 直接构建当前检出态，build-report 记录实际 commit。
+- **钉定**：`release` 把漂移收拢成一个 commit（gitlink + bundle.yaml + releases 产物）+ tag `suite/<ver>`。`git clone --recursive && git checkout <tag>` 仍得到完全确定的构建输入。
+- **core 前进**：bundle.yaml `core.pin: auto` 时 `up` 查 GitHub API（Eugeny/tabby latest release），有新版自动 `core use`：下载 portable zip → sha256 → **自动登记 vendor/index.json** → 回写 bundle.yaml core.version → 重钉 reference/tabby（fetch tag v\<新\> + checkout，同为待钉定漂移）。`pin: <版本>` 则锁定不自动前进。
+- **无人值守滚动（rollout）**：`up` 是人工回路（每次必 build+verify），`rollout` 是调度回路（计划任务/cron）——sync + core 查新后，**core 无新版且子仓无前进 → 零动作退出（exit 0）**，有变化（或 --force）才 build+verify；`--release` 连带发布，门禁链原样生效（脏子仓/verify 红在此拒绝），父仓推送仍人工。变化判定靠信号不靠猜：sync 返回子仓拉动摘要、ensureLatestCore 返回 core 是否前进。定时跟进官方最新示例：`schtasks /Create /TN TabbySuite-Rollout /TR "node <repo>\tools\suitectl\cli.js rollout" /SC DAILY /ST 09:00`
 
-### 6.2 构建与适配（唯一 adapter）
+### 3.2 构建与适配（唯一 adapter）
 
-`component-build`，输入 = 子仓检出态，流程 = `npm install`（尊重各仓 `.npmrc`，如 GlassTheme 的 `legacy-peer-deps`）→ `npm run build`（webpack 或 tsc，按仓库）→ 规范化 stage（sanitize package.json，保留 `keywords:["tabby-plugin"]`）→ zip。
+`build`，输入 = 子仓检出态，流程 = `npm install`（**按 package.json+lock+flags 的基线戳决定重装**，戳存 cache/install/ 不污染子仓）→ `npm run build` → 单测/冒烟（有则必跑，失败即 build 失败）→ 规范化 stage（sanitize package.json，保留 `keywords:["tabby-plugin"]`；dist 必须是子目录——压平破坏 main 解析）→ tar zip（带顶层 \<pkg\>/ 目录）。
 
-铁律（踩过的坑，自动校验）：
-- **dist/ 必须是 package.json 旁的子目录**——压平会导致 `main` 解析失败（TWX CLAUDE.md 实证）；
-- **不复用各仓库 `package:install`**（行为不一致、Filter 硬编码错路径、3 仓库缺失）——安装只是把规范工件拷进 `data/plugins/node_modules/<pkg>/`；
-- assemble = 官方 zip 解包（原样）+ 拷入全部启用组件的规范工件 + 播种 profile + 写 suite.json。
+- **缓存键 = commit + 配方**：`cache/plugins/<pkg>@<commit>/`，meta 记 `recipe`（payload/install flags/sanitize 字段的 hash）——bundle 配方变了同 commit 也重建；脏树构建不冒充干净构建。
+- **core 解包缓存** `build/core-cache/<版本>/`（zip sha256 标记）→ 硬链接克隆进 stage（**硬链铁律**：只用于永不被执行的树；dev/verify 实例实拷）。
+- **失败即失效**：assemble 中途失败会清掉 build-report 与 .verify-passed——绝不留旧凭证冒充当前 stage。
+- 互斥校验：rules.mutuallyExclusive（TerminalWorkwench ↔ command-workbench）；组件同名包查重。
 
-互斥校验：TerminalWorkwench 与 command-workbench 互为继任（前者一次性导入后者配置），同时集成直接报错。WebViewer↔HotkeyGuard 已有显式兼容代码，默认同装（与 main 实例一致）。
+### 3.3 verify：发布门禁
 
-内环提速与多仓防线（2026-10-07 落地）：
-- **core 解包缓存** `build/core-cache/<版本>/`（zip sha256 标记）→ 硬链接克隆进 stage，重复 build 跳过 186MB 解包（实测 35s → 14s）。**硬链铁律**：硬链共享 inode 与文件锁，只用于"永不被执行"的树；dev/verify 实例必须实拷（s4 发布曾因 dev 实例硬链运行锁波及 Compress-Archive 而翻车，已修）。
-- **单测进流水线**：组件构建后自动跑各自 `npm test` / `npm run smoke`（存在才跑、失败即 build 失败）——多仓并行开发时 A 仓改坏的第一道防线。
+stage 全新实拷为 `runtime/instance/`（instance.json 在实例目录内，自描述；CDP 端口 bind 探测），`ELECTRON_ENABLE_LOGGING=1` 启动捕获 stderr，四级断言：
 
-### 6.3 verify：发布门禁（P2 已实现）
+1. **插件全载**：renderer console 的 `Loading <name>:` 行（Tabby 剥 `tabby-` 前缀；包名按字面转义匹配）；
+2. **无致命 ERROR**（过滤已知良性，如 Jump List 花边）；
+3. **CDP 探针**（bundle.yaml `probes:`）：渲染层表达式 === 期望（GlassTheme 探针含 `appearance.theme === 'Glass'`——s1 回归防复发）；
+4. **回归挂钩**（`regression:`，enabled 才跑）：`CDP_PORT` 注入执行仓库自带脚本。
 
-`suitectl verify` 把 stage 全新拷贝为 `runtime/instance/`（TabbyEnv 同构 `instance.json`；CDP 端口在 9241–9268 内 **bind 探测**分配——Windows 保留段随重启漂移，2026-10-07 实测 9249–9348 整段不可绑、9251 报 WSAEACCES），以 `ELECTRON_ENABLE_LOGGING=1` 启动并捕获 stderr，四级断言：
+通过写 `build/.verify-passed`（**含 stageTreeHash**）；失败保留现场（实例目录 + `runtime/instance-boot.err`）。
 
-1. **插件全载**：renderer console 的 `Loading <name>:` 行——Tabby 会剥 `tabby-` 前缀（日志是 `Loading glass-theme:` 而非包名）；`data/log.txt` 不含插件行，不作信号源；
-2. **无致命 ERROR**：过滤已知良性（Jump List 隐私设置花边；terminal-workwench 的 vm module 警告是 INFO 不拦截）；
-3. **CDP 探针**（bundle.yaml `probes:`）：渲染层任意表达式 === 期望——GlassTheme 探针含 `appearance.theme === 'Glass'`（s1 "主题不加载"回归的防复发：GlassTheme 是不接管配置的常规主题，须 profile 种子 `appearance.theme: Glass` 显式选中）；
-4. **回归挂钩**（bundle.yaml `regression:`，`enabled: true` 才跑）：`CDP_PORT` 注入执行仓库自带脚本（WebViewer `recorderTest.js` 依赖 wv fixture 基线，种子化前保持 disabled）。
+### 3.4 release：发布即锁
 
-通过写 `build/.verify-passed`（含 suiteVersion，release 校验版本匹配防过期）；**失败保留现场**（实例目录 + `runtime/instance-boot.err`），直接进 tabby-debug 流程定位。
+门禁链（全部可显式跳过，各带 flag）：① 脏子仓拒绝（--allow-dirty）② verify 绿 + stage 树 hash 复核（--no-verify）③ tag 冲突预检 ④ gitlink 远端可解析——每个子仓 HEAD 必须 push 到其远端 main（--no-remote-check），同时列出本次将钉定的 gitlink 漂移。
 
-### 6.4 release：出包即打 tag
+产出：全量 zip（tar）→ SHA256SUMS（累积多版本）→ channel.json（v2 条目：每插件 zip/sha256/treeSha256 + **notes 原文入档**——CHANGELOG 重生成只依赖 channel 存档，不读子仓现状）→ CHANGELOG.md → **自动钉定**（git add bundle.yaml components releases/* → commit `release: <ver>` → tag）→ **上传 GitHub Releases**（gh：全量 zip + 每插件 zip + channel.json；--no-upload 跳过；代理自动注入 HTTPS_PROXY）。
 
-前置：`build/.verify-passed` 版本匹配（P2 门禁已实现，`--no-verify` 显式跳过）+ 全部子仓干净 + bundle.yaml serial 递增。产出：
-- `releases/tabby-suite-<core>-s<serial>-portable-x64.zip`
-- `SHA256SUMS`、`update-channel.json`（见 §7）、`CHANGELOG.md`（自各仓 `RELEASE_NOTES.md` `# v<ver>` 段 / `CHANGELOG.md` `## <ver>` 段抽取对应版本段落，至多 8 行，无则从略）；
-- 父仓打 annotated tag `suite/<core>-s<serial>` —— **tag 即发布记录**，日后按 tag 冷复原重建（`git clone --recursive` → checkout tag → build，产物 hash 应一致）。
+releases 目录被移出仓库时拒绝钉定（--no-git 只出包+上传）。
 
-### 6.5 滚动更新（G2）
+### 3.5 滚动更新（G2 · 已实现，单一实现 ps1）
 
-**一条规则**：比对 `data/suite/suite.json` 与 channel 最新条目——core 版本变 → 路径 B；否则 → 路径 A。
+`suite-tools/suitectl.ps1`（目标机 Windows 自足；CLI 的 `update/doctor --dest` 转调同一脚本）：
 
-**路径 A · 插件级**（多数场景）：下载变化插件的规范 zip → SHA256 校验 → 解到 `<pkg>.new` → 原子换名（旧件入 `data/suite/.backup/<ts>/`）→ 更新 suite.json → 提示重启（无热替换）。
+- **channel 获取**：默认 `https://github.com/<repo>/releases/latest/download/channel.json`（GitHub 固定 URL，无需 API），资产 URL = channel.baseUrl + `/suite/<ver>/<file>`；`-ChannelUrl` 可指本地文件/自建源；`-Proxy http://127.0.0.1:7892` 走代理。
+- **check**：比对本机 suite.json 与 channel 最新条目，列 core/插件差异。
+- **apply（插件级，多数场景）**：进程占用检查（按 exe 路径，占用拒绝/-Force 杀）→ 下载变化插件 zip → sha256 校验 → 解 `.new` → 旧件入 `data/suite/.backup/<ts>/` → 原子换名 → 回写 suite.json → 提示重启。
+- **apply（core 级）**：全量 zip 校验 → `.staging/` 解包 → rename dance（现有非 data 项 → `<root>.old/`，staging 就位；data/ 原地保留；旧 suite.json 快照入 `.old/_suite.json`）。
+- **rollback**：`.old` 存在则 core 级回滚（反向 rename + 恢复快照），否则插件级从最新 `.backup/<ts>/` 恢复。
+- **doctor**：重算每插件目录树 hash + core 树 hash（排除 data/）与 suite.json 比对，篡改/缺失逐项报告。
+- **treeHash 算法**（Node `lib/hash.js` 与 ps1 `Get-TreeHash` 严格同构，已实测一致）：文件按 posix 相对路径 ordinal 排序，每行 `<文件sha256 小写>  <相对路径>` 以 `\n` 结尾，整体 utf8 文本的 sha256。
 
-**路径 B · core 级**：前置检测目标目录 Tabby.exe 进程已退出（按可执行文件路径匹配，占用即拒绝）→ 新 zip 解到 `<root>.staging/`（剔除 data/）→ rename dance：现有非 data 项 → `<root>.old/`，staging 项就位 → data/ 迁移（变化插件走路径 A；config.yaml 不动）→ 成功启动后 GC `<root>.old`。
+### 3.6 dev：长驻开发实例
 
-**回滚 = 一条命令**：`suitectl update --rollback` 从 `.backup/`（A）或 `<root>.old`（B）恢复并回写 suite.json；备份保留至下一次成功 doctor。
+`dev up`（stage 实拷 runtime/dev/，detached 启动长驻）/ `restart`（保端口）/ `down` / `status`；`dev deploy [组件…]`：默认脏组件，构建（复用缓存）+ 直拷进实例；**--restart 顺序为"先停 → 拷贝 → 再启动"**（运行中实例锁着已加载的 native addon，如 rdp_host.node，边跑边删必失败）。实例内 suite.json 同步记录部署态。dev 族永不产出 releases、永不写 .verify-passed。
 
-**与内置 updater 的冲突**：profile 种子显式关闭 Tabby 自动更新（确切 config 键在 P3 隔离实例实证后写死，候选 `application.updateAutomatically: false`）。
+### 3.7 环境解耦与代理（配置层 · 平台层 · vendor 获取）
 
-### 6.6 CLI（双轨动词：开发轨 dev 族 / 构建轨其余）
-
-```
-── 开发轨（脏树允许 · 长驻实例 · 永不产出 releases）──
-suitectl dev up              # stage 为母本实拷 runtime/dev/ 长驻实例并启动（CDP bind 探测）
-suitectl dev deploy [组件…]   # 默认全部脏组件：构建+直拷进实例（秒级）；--restart 一条龙
-suitectl dev restart|down|status
-── 构建轨（钉定 · 单测 · 门禁）──
-suitectl sync      # 子仓拉远端最新（分支安全：只快进 .gitmodules 分支上的干净检出，feature 分支不设防被挪）
-suitectl build     # core 校验 + 组件构建（含各自 test/smoke）+ assemble（core 解包缓存硬链复用）
-suitectl verify    # 隔离实例四级断言；失败保留现场
-suitectl release   # 门禁三重：verify 绿 + gitlink 远端可解析（先子仓后父仓守门）+ 子仓干净
-suitectl update    # 目标机更新：--check / --apply / --rollback（随包分发精简版 suitectl.ps1）[P3]
-suitectl doctor    # 安装态核对（suite.json hash vs 实文件、进程探活）；--gc 清理旧备份/缓存 [P3]
-```
-
-实现：Node ≥22、Plain JS、依赖仅 `js-yaml`；zip/解压走 PowerShell `Compress-Archive` / `Expand-Archive`（与现有 package.js 同路线）；hash 用 `node:crypto`。
-
-### 6.8 dev：长驻开发实例（开发/构建分离的落地）
-
-多仓开发的内环轨道，与构建流水线（§6.2–6.4）严格分离：
-
-- `dev up`：以 stage 为母本**全量实拷**出 `runtime/dev/`（instance.json 与 TabbyEnv 同构、CDP 端口 bind 探测、detached 启动长驻——CLI 退出后存活）；`status / down / restart` 管理生命周期（restart 保端口、按可执行文件路径杀进程、含渲染层就绪余量）。
-- `dev deploy [组件…]`：默认只处理**脏** integrate 组件——构建（复用缓存）+ 直拷规范工件进实例 `data/plugins/node_modules/`，单插件秒级；`--restart` 一条命令完成"改码 → 部署 → 重启 → CDP 就绪"。实例内 suite.json 同步记录部署态（版本/commit/dirty/时间）。
-- **纪律**：dev 族允许脏树正是其意义（快速迭代），但**永不产出 releases、永不写 .verify-passed**——出包必须回构建轨（干净树 + 单测 → verify → release 三重门禁）。
+- **环境配置**（`lib/config.js`）：优先级 代码默认值 ← `suitectl.config.yaml` ← `suitectl.local.yaml` ← `TABBYSUITE_*`。可覆盖 `paths.*`（vendor/cache/build/runtime/releases 可移出仓库）、`ports.cdp`、`platform.exe/powershell/npmShell`、**`net.proxy`**、`dist.repo`（GitHub 托管仓）、`vendor.autoDownload/downloadTimeoutSec`。
+- **代理一等公民**：所有外网获取（GitHub API / core zip / channel / gh 上传 / ps1 更新器）统一走 `net.proxy`；临时切换 `TABBYSUITE_PROXY=http://127.0.0.1:7892`（空串=强制直连）。下载实现为系统 curl（`-x` 原生支持，绕开 Node fetch 不认 HTTP_PROXY 的限制）；gh 调用注入 HTTPS_PROXY；ps1 用 `Invoke-WebRequest -Proxy`。CDP 等 127.0.0.1 流量不经此层。
+- **平台能力层**（`lib/platform.js`）：tar zip/unzip（Windows 显式优先 System32 bsdtar——PATH 前部的 Git Bash GNU tar 不识 zip）、curl fetchUrl/getJson、PowerShell 进程管理、npm、按路径杀/数进程、CDP bind 探测集中于此。
+- **vendor 获取**（`lib/vendor.js`）：index.json 只记 file/sha256/origin；新版本由 `core use` 下载后**计算** sha256 自动登记（信任锚 = GitHub 官方 Releases；release 钉定时随父仓落库）。`--offline` 全局禁网。
+- **预检**：`suitectl env`（--json）一次列出缺什么怎么补（node/git/子仓/tar/curl/gh/代理状态/目录/端口/core zip）。
 
 ---
 
-## 7. 数据模型
+## 4. 数据模型
 
-### 7.1 bundle.yaml（唯一人工配置，极简）
+### 4.1 bundle.yaml（唯一内容配置：构建什么）
 
 ```yaml
-suite:
-  name: tabby-suite
-  serial: 1                      # 发布序号，出包时递增
+suite: { name: tabby-suite }
 core:
-  version: 1.0.237               # 官方 portable 版本（vendor 按此取 zip）
+  version: 1.0.237        # 当前构建 core（pin:auto 时 up 自动前进并回写；随 release 钉定落库）
+  pin: auto               # auto=跟随官方最新 | 写死版本=锁定
 profile: base
-integrate:                       # 参与集成的子仓；版本 = 各自 gitlink（父仓 commit 即锁）
-  [WebViewer, HotkeyGuard, GlassTheme, Filter, BetterConfiger, TerminalWorkwench]
-exclude: [tabby-command-workbench]   # 已收编不集成（第三方，与 TerminalWorkwench 互斥）
-regression:                      # 可选：verify 第三级挂钩（cwd 相对 components/）
-  WebViewer: { script: recorderTest.js, cwd: WebViewer/scripts }
+integrate:  [WebViewer, HotkeyGuard, GlassTheme, Filter, BetterConfiger, TerminalWorkwench, ActivxRDPClient]
+exclude:    [tabby-command-workbench]   # 第三方，与 TerminalWorkwench 互斥
+install:    { WebViewer: { flags: [--legacy-peer-deps] }, … }
+payload:    { ActivxRDPClient: [native] }   # 规范工件之外的附加载荷
+probes:     { GlassTheme: [...] }           # verify ③
+regression: { WebViewer: { script: recorderTest.js, cwd: WebViewer/scripts, enabled: false } }
+rules:      { mutuallyExclusive: [[tabby-terminal-workwench, tabby-command-workbench]] }
 ```
 
-### 7.2 发布侧 update-channel.json 与 安装态 suite.json
+serial **不在本文件**——由 channel 派生（见 §3.1）。环境配置（路径/端口/代理/平台工具）不在本文件，见 §3.7。
+
+### 4.2 channel.json（发布侧，随 GH Releases 分发）与 suite.json（安装态）
 
 ```jsonc
-// releases/update-channel.json（release 时生成/追加）
+// releases/update-channel.json（release 时生成/追加；同时作为 release 资产上传）
 {
-  "latest": "1.0.237-s1",
+  "latest": "1.0.238-s1",
+  "baseUrl": "https://github.com/MintSpearCandy/TabbySuite/releases/download",
   "releases": {
-    "1.0.237-s1": {
-      "core": "1.0.237",
-      "zip": "tabby-suite-1.0.237-s1-portable-x64.zip",
-      "sha256": "…",
-      "plugins": { "tabby-webviewer": { "version": "0.4.9", "sha256": "…" } }
+    "1.0.238-s1": {
+      "core": "1.0.238", "zip": "tabby-suite-1.0.238-s1-portable-x64.zip", "sha256": "…",
+      "plugins": { "tabby-webviewer": { "version": "0.4.10", "commit": "…", "zip": "tabby-webviewer-0.4.10.zip", "sha256": "…", "treeSha256": "…" } },
+      "notes": ["tabby-webviewer 0.4.10 @6b0a450c\n<RELEASE_NOTES 摘录>"],
+      "releasedAt": "…"
     }
   }
 }
 ```
 
 ```jsonc
-// 分发物 data/suite/suite.json（updater 维护）
+// 分发物 data/suite/suite.json（updater 维护；doctor 的比对基准）
 {
-  "suiteVersion": "1.0.237-s1",
-  "core":    { "version": "1.0.237", "sha256": "…" },
-  "plugins": { "tabby-webviewer": { "version": "0.4.9", "sha256": "…" } },
-  "updatedAt": "2026-10-06T20:00:00+08:00"
+  "suiteVersion": "1.0.238-s1", "exe": "Tabby.exe",
+  "channel": "https://github.com/MintSpearCandy/TabbySuite/releases/latest/download/channel.json",
+  "core":    { "version": "1.0.238", "zipSha256": "…", "treeSha256": "…" },
+  "plugins": { "tabby-webviewer": { "version": "0.4.10", "commit": "…", "zip": "…", "zipSha256": "…", "treeSha256": "…" } }
 }
 ```
 
 ---
 
-## 8. 关键决策（ADR）
+## 5. 关键决策（ADR）
 
 | # | 决策 | 理由 |
 |---|---|---|
-| 1 | **父仓 commit/tag 即锁**，无 lock 文件 | gitlink 天生版本化于父仓；消灭 lock/gitlink 双态与漂移问题；冷复原 = clone --recursive + checkout tag |
-| 2 | **开发整体迁入 components/ 子仓**，TabbyPlugins/ 归档退役 | 开发现场与集成输入合一，回路最短：子仓 commit → 父仓 commit gitlink = 集成 |
-| 3 | 唯一 adapter `component-build`，不复用 `package:install` | 7 仓统一从源码构建，行为一致、可复现；安装只是拷贝 |
-| 4 | core 官方 zip **原样分发**，定制只进 `data/` 与 `suite-tools/` | 免 asar 维护，core 升级零成本，跟随官方分发形态 |
-| 5 | flat 便携布局（不做 versions/ 并列目录） | 与官方便携版/用户习惯一致；回滚用 `.backup` / `<root>.old` 达成 |
-| 6 | **自建 updater** + 种子配置禁用内置自动更新 | keygen 通道只更新 core 且不受控，与自管滚动更新冲突 |
-| 7 | verify 实例 schema 兼容 TabbyEnv `instance.json` | 不污染调试环境；tabby-debug skill 与既有 CDP 脚本直接复用 |
-| 8 | 更新单规则两路径（core 变→整包；否则→插件目录） | 插件更新占 95% 且实现极简；core 更新天然走完整包，无增量补丁复杂度 |
-| 9 | 版本事实 = 各仓库 `package.json`；套件版本 = `<core>-s<serial>`；发布 = 父仓 tag | 尊重仓库现状；发布记录即 git 历史 |
-| 10 | Node CLI + `js-yaml` + PowerShell 原语 | 与全部现有脚本同栈，零新依赖面 |
-| 11 | **集成仓独立上 GitHub**；子仓远端不变、各自独立维护 | 集成是消费关系而非吞并——父仓只持 gitlink；**子仓本地提交必须先推各自远端，gitlink 才全局可解析**（`clone --recursive` 完整性前置；日常推送顺序：先子仓后父仓） |
-| 12 | Tabby 核心源码以 `reference/tabby` **浅子仓**钉定（v<core>，gitlink 入父仓；不进 components/、不经 sync 前进） | 开发参考与构建包源（vendor zip）分离；参考版本与构建 core 同版由 build 校验；"父仓即锁"对参考源同样成立，且 shallow 不拖重 recursive clone |
-| 13 | **开发/构建双轨制**：dev 族（脏树/长驻实例/秒级部署）与 build/release 族（钉定/单测/三重门禁）分离；硬链仅限永不执行的树 | 统一仓管版本代码，但迭代速度与发布纪律互不妥协；release 增加 gitlink 远端守门，把"先子仓后父仓"从口头纪律变成机器检查 |
+| 1 | **发布即锁**（v2 修订）：日常浮动构建，release 自动钉定 gitlink+bundle+tag | "一键同步最新并构建"与"可复现"不冲突——复原性由发布点保障，日常零 commit 负担 |
+| 2 | 开发整体迁入 components/ 子仓 | 开发现场与集成输入合一，回路最短 |
+| 3 | 唯一 adapter，不复用 `package:install` | 7 仓统一从源码构建，行为一致可复现；安装只是拷贝 |
+| 4 | core 官方 zip 原样分发，定制只进 `data/` 与 `suite-tools/` | 免 asar 维护，core 升级零成本 |
+| 5 | flat 布局 + zip 带顶层 `tabby-suite/` 目录 | 解压即得独立目录；回滚用 `.backup` / `<root>.old` |
+| 6 | 自建 updater（ps1）+ 种子禁用内置自动更新 | keygen 通道只更新 core 且不受控 |
+| 7 | 更新单规则两路径（core 变→整包 rename dance；否则→插件目录换名） | 插件更新占 95% 且实现极简 |
+| 8 | 版本事实 = 各仓库 package.json；套件版本 serial 由 channel 派生 | 发布记录即 git 历史；serial 全自动，杜绝手改 bundle 出错 |
+| 9 | Node CLI + js-yaml + 系统工具（tar/curl/PowerShell） | 零新依赖面；tar 消除 Compress-Archive 隐藏文件/长路径隐患；curl 原生代理 |
+| 10 | 子仓远端独立维护，先子仓后父仓 | 集成是消费关系；release gitlink 门禁把口头纪律变机器检查 |
+| 11 | reference/tabby 浅子仓钉 v\<core\>，core 前进自动重钉 | 参考版本与构建 core 同版由 build 校验 |
+| 12 | 开发/构建双轨制；硬链仅限永不执行的树 | 迭代速度与发布纪律互不妥协 |
+| 13 | 内容/环境配置分离；**代理为环境配置一等公民** | 仓库跨机可复现；各机代理只进 local.yaml/环境变量，不入库 |
+| 14 | channel/更新包托管 GitHub Releases；更新器用固定 URL 拉 channel | 仓库已 public 天然带 CDN；`releases/latest/download/channel.json` 免 API 免限流 |
+| 15 | 更新器单一实现（ps1），CLI update/doctor 转调 | 不写第二份逻辑，分发物与构建机行为一致 |
+| 16 | treeHash（Node/ps1 同构算法）作为安装态完整性基准 | doctor 可校验目录树而非仅 zip；verify 与 release 用同一指纹绑定 |
+| 17 | notes 原文入 channel 存档，CHANGELOG 只从 channel 重生成 | 历史不可漂移——子仓重构 notes 不影响已发布版本的 changelog |
 
 ---
 
-## 9. 风险
+## 6. 风险
 
 | # | 风险 | 缓解 |
 |---|---|---|
-| R1 | 旧代工具链（TS 4.2 / NG7 / awesome-typescript-loader）在高版本 Node 下构建未实证 | build 记录每仓 Node 版本；必要时按仓固定构建 Node |
-| R2 | 多数仓库无 lockfile，构建依赖可能漂移 | 缓存键含 package.json hash；逐步给各子仓补 lockfile 后即严格复现 |
-| R3 | 禁用内置自动更新的确切 config 键未实证 | **部分实证（2026-10-07）**：`application.updateAutomatically: false` 键被 Tabby 重写保留、且无任何更新落盘痕迹（未自装）；但启动仍会 "Checking for updates / Update available" 日志。P3 继续找完全静默键 |
-| R4 | 更新须应用完全退出（Windows 文件锁）；多实例并存 | update 前置按可执行文件路径检测进程；CDP 探活辅助 |
-| R5 | 磁盘占用（每套件解压 ~250 MB × vendor/cache/releases/runtime） | `doctor --gc`（备份/缓存/旧 zip 保留 N=2） |
-| R6 | 第三方 tabby-command-workbench 源安全 | gitlink 钉 tag + 产物 hash 校验；默认 exclude |
-| R7 | config.yaml schema 随 core 演进，种子键可能失效 | verify 断言种子键在目标 core 生效；升 core 必跑 verify |
+| R1 | 旧代工具链（TS 4.2 / NG7）在高版本 Node 构建未实证 | build 记录每仓 Node 版本；必要时按仓固定构建 Node |
+| R2 | 多数仓库无 lockfile，构建依赖可能漂移 | 安装基线戳感知 package.json 变化；逐步补 lockfile |
+| R3 | 禁用内置自动更新的静默键未完全实证 | `application.updateAutomatically: false` 已实证保留且无落盘；日志仍有 Checking for updates |
+| R4 | 更新须应用完全退出（Windows 文件锁） | ps1 apply 前置按 exe 路径检测进程，占用拒绝（-Force 显式杀） |
+| R5 | 磁盘占用（vendor/cache/releases/runtime × 套件） | 手工清理 + 后续 doctor --gc |
+| R6 | GitHub API 限流（60 req/h 未认证） | up 每次仅 1 次查询；core use 可带版本直下 |
+| R7 | GitHub 不可达（网络环境） | 代理一等公民（net.proxy / TABBYSUITE_PROXY / ps1 -Proxy）；失败给手工放置指引 |
+| R8 | core 前进引入不兼容（种子键/插件 peerDeps） | up 必跑 verify 四级断言；probes 覆盖种子键生效性 |
 
 ---
 
-## 10. 一次性迁移（TabbyPlugins → components/）
+## 7. 实施路线（v2）
 
-1. **清点待迁移状态**：WebViewer / BetterConfiger 有脏文件（调试脚本为主）——有价值者先 commit+push；Filter package.json 0.5.7 领先最后 tag v0.5.5，确认是否已推送。
-2. `git init` TabbySuite → 7 × `git submodule add <https 远端> components/<dir>` → command-workbench checkout `v1.2.5` → 提交 gitlink 与 `.gitmodules`。
-3. **skills 随迁**：`TabbyPlugins\.claude\skills\*` → `TabbySuite\.claude\skills\`（改写内含路径）；各仓库 `.claude/`、`test-env/` 若为未入库内容则手工拷入对应子仓。
-4. **更新 tabby-debug skill 的 ENVIRONMENT.md**：插件项目根 `D:\Home\Project\TabbyPlugins\…` → `D:\Home\Project\TabbySuite\components\…`；实例清单补记 `runtime/instance`（CDP 9250+）。
-5. vendor 导入：把 `D:\Env\TabbyEnv\tabby-1.0.23{4,5,7}-portable-x64.zip` 登记（拷贝或登记路径）进 `vendor/index.json`。
-6. `TabbyPlugins/` 改名 `TabbyPlugins.archive/` 只读保留，稳定一个迭代周期后删除。
-
----
-
-## 11. 实施路线
-
-| 阶段 | 内容 | 验收标准 |
+| 阶段 | 内容 | 状态 |
 |---|---|---|
-| **P1 收编+MVP 出包** | §10 迁移 1–5 + bundle.yaml + `component-build` + build/assemble + release（verify 先手动） | ✅ **2026-10-07 完成**：`tabby-suite-1.0.237-s1-portable-x64.zip` 已发布（tag `suite/1.0.237-s1`），验收实例 6/6 插件全载（renderer console `Loading` 行实证），core 文件零改动 |
-| **P2 门禁自动化** | verify 实例工厂（boot/全载/回归挂钩）+ 按 commit 缓存 + CHANGELOG 汇总 + `sync` | ✅ **2026-10-07 完成**：verify 四级断言 + release 门禁 + changelog 抽取落地，s2 为首个过门禁版本（顺带修复 cmpVer 二条目比较 bug）。剩余：WebViewer 回归挂钩启用（待 wv fixture 种子化） |
-| **P3 滚动更新** | update-channel + suite-tools（两路径 + rollback + doctor）+ 内置更新禁用实证（R3） | s1→s2 走插件级免重装 core；注入损坏工件能回滚；doctor 能发现篡改 |
-| **P4 可选演进** | dev/stable 双通道、GitHub Releases 作 channel 源、`D:\App\Tabby` 迁移为套件实例、定时检查 | 按需定义 |
+| v1 P0–P2（2026-10-07~19） | 收编/MVP 出包/门禁自动化/环境解耦（详见 git 历史） | ✅ |
+| **v2 重构（本版）** | 全浮动·发布即锁；core 最新自动获取登记；tar/curl 系统工具引擎；代理一等公民；GH Releases 托管 + channel v2；ps1 更新器完整闭环（check/apply 两路径/rollback/doctor）；v1 缺陷审查的修复（缓存配方键/安装基线戳/stage hash 绑定/serial 派生/latest 比较/CHANGELOG 存档化/dev deploy 顺序等） | ✅ 2026-10-20 |
+| 后续 | WebViewer 回归挂钩启用（待 fixture 种子化）；doctor --gc；Linux 打包路径实证 | |
 
 ---
 
-*更新记录：v0.1（2026-10-06）初版；v0.2 引入 components/ 子仓 + lock/gitlink 双态；v0.3（2026-10-06）简化重构——开发整体迁入子仓（TabbyPlugins 退役）、废除 lock 文件与双态（父仓 commit/tag 即锁）、ref 三语义与 resolve 阶段移除、adapter 收敛为唯一 `component-build`、CLI 收敛为 6 动词、新增一次性迁移清单；v0.3.1（2026-10-07）P1 落地实证回填——verify 信号源定为 renderer console（ELECTRON_ENABLE_LOGGING）、CDP 端口需 bind 探测、R3 部分实证、s1 发布；v0.4（2026-10-07）P2 落地——verify 四级断言实例工厂 + release 门禁 + changelog 抽取，s1 GlassTheme "主题不加载"回归定位（常规主题须 profile 种子选中，`appearance.theme: Glass`）并修复于 s2；v0.4.1（2026-10-07）集成仓上 GitHub + 子仓 lockfile 提交推送（ADR #11）；v0.4.2（2026-10-07）范围审计（profile 收紧/公开/s3）与 `reference/tabby` 源码参考子仓（ADR #12）；**冷复原实测通过**（异目录 `clone --recursive` → checkout `suite/1.0.237-s3` → build → verify 全绿，顺带修复全新克隆 js-yaml 缺失的引导缺口）；v0.5（2026-10-07）多仓开发支持落地（ADR #13）——dev 命令族（长驻实例/秒级单插件部署）、core 解包缓存（硬链铁律）、单测进流水线、sync 分支安全、release gitlink 远端守门，s4 全门禁发布。*
-
-*附：环境事实以 2026-10-06 为准，变化请同步更新 §1.1 与 §6.3。*
+*更新记录：v0.1–v0.6 见 git 历史（v0.6 为环境解耦）。v1.0（2026-10-20）v2 重构落地——设计原则从"父仓 commit 即锁"演进为"全浮动·发布即锁"，新增 core 自动查新/登记、tar 打包引擎、代理层、GH Releases 托管、目标机更新器完整闭环；同步修复 v1 缺陷审查发现的全部高危项。treeHash Node/ps1 同构性、tar 往返保真（含隐藏文件）、代理/直连双模式已实测。*
