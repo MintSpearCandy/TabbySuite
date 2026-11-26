@@ -34,3 +34,7 @@
 	url = https://github.com/MintSpearCandy/tabby-activx-rdp-client.git
 	path = components/ActivxRDPClient
 	branch = main
+[submodule "components/TabbyMux"]
+	path = components/TabbyMux
+	url = https://github.com/MintSpearCandy/tabby-mux.git
+	branch = main

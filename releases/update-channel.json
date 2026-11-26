@@ -1,5 +1,5 @@
 {
-  "latest": "1.0.238-s1",
+  "latest": "1.0.238-s2",
   "releases": {
     "1.0.237-s1": {
       "core": "1.0.237",
@@ -273,6 +273,88 @@
         "tabby-activx-rdp-client 0.1.0 @4f53b568"
       ],
       "releasedAt": "2026-11-25T17:01:44.706Z"
+    },
+    "1.0.238-s2": {
+      "core": "1.0.238",
+      "zip": "tabby-suite-1.0.238-s2-portable-x64.zip",
+      "sha256": "38dc1ec4baed3133210dd3749365057d6edd84d6463db2df6db073fd4935d9e1",
+      "plugins": {
+        "tabby-webviewer": {
+          "version": "0.4.14",
+          "commit": "94dcd57858db80e934016f169cf21f92426fd636",
+          "dirty": false,
+          "zip": "tabby-webviewer-0.4.14.zip",
+          "sha256": "397c6e7d03e5634f3eae1254e7e1d3e70d6500b78dbf8807f5dc5822c89ea4fb",
+          "treeSha256": "67e62ece1336e5f9ab391776ae4bd11f9bae834e4367eb688029b2314993e161"
+        },
+        "tabby-hotkey-guard": {
+          "version": "0.2.1",
+          "commit": "b7eeb41ee130e4c26bb33bd0e6ac16181a10c58f",
+          "dirty": false,
+          "zip": "tabby-hotkey-guard-0.2.1.zip",
+          "sha256": "bf357a6dd0364b2b1a44338bd70d85408b784ed900e9be5294115494ba692df0",
+          "treeSha256": "5d755891cb23c1c64b157707ad48e045f201d3754597d3d8ee62fb73af29c0df"
+        },
+        "tabby-glass-theme": {
+          "version": "0.5.0",
+          "commit": "1dd26b29845735a703d6e5a1d27a57832ebab24a",
+          "dirty": false,
+          "zip": "tabby-glass-theme-0.5.0.zip",
+          "sha256": "46f8bc0ec2c4107e09bf2fe5b2a79627ade2a9e7ce42f91f2eca74573ef88754",
+          "treeSha256": "3075f904950b2ccc4f4374217f3394c14fce4a6fe7d1c09947bbf5d2c71613c2"
+        },
+        "tabby-output-filter": {
+          "version": "0.5.7",
+          "commit": "2848afc7cbb2b13ae97ed8bfbbc6d01cc10f8a7c",
+          "dirty": false,
+          "zip": "tabby-output-filter-0.5.7.zip",
+          "sha256": "bc6ab617506dc7bd2b06f90c4ea771935b04f1a2eeed4ec7f2de77fc422f6529",
+          "treeSha256": "6256db46b653d3bf7dc4dcc44fe075346db3254a5c2a4fdd692462c7758ea05a"
+        },
+        "tabby-better-configer": {
+          "version": "0.4.0",
+          "commit": "55ce63260f7264115fb61fe957978b5172797e76",
+          "dirty": false,
+          "zip": "tabby-better-configer-0.4.0.zip",
+          "sha256": "025dbba790fd3e5e18efc8d84c52ce2a8ae34415a191f8baf8dd7121e149741c",
+          "treeSha256": "6e148641f0fc203ad080b5974dab0ccf075e55fc1244bf42342b172130992ad5"
+        },
+        "tabby-terminal-workwench": {
+          "version": "0.2.5",
+          "commit": "3f82416c3c57c9570810bee684164cd2a7734f91",
+          "dirty": false,
+          "zip": "tabby-terminal-workwench-0.2.5.zip",
+          "sha256": "ac8a53659b197fbcdfeef67862155bb94cd0bb2043bdbb188af4ab2d800b116d",
+          "treeSha256": "2302c9c432480d54f8d0077c22b1ce6f157b2d1aeef9350bfca148c7ef9f32c7"
+        },
+        "tabby-activx-rdp-client": {
+          "version": "0.1.0",
+          "commit": "4f53b56877a94c7b11eac39809722a41912280ca",
+          "dirty": false,
+          "zip": "tabby-activx-rdp-client-0.1.0.zip",
+          "sha256": "e044248ec1e4c84e3c497df2a62c6ea005abbee01c97b4a835c518d2910dbffd",
+          "treeSha256": "5d0f8b13eeef2c001784e397e67e067fe63147a627b7cb6b9547a4921832992c"
+        },
+        "tabby-mux": {
+          "version": "0.1.0",
+          "commit": "38c8b4057d12f388442dff48929c2208fccf198e",
+          "dirty": false,
+          "zip": "tabby-mux-0.1.0.zip",
+          "sha256": "b2915b65c365e98ebded1ecc966cc5db73e9b498bfb5f955a72c7d1d69ec0f9e",
+          "treeSha256": "19fb2f9f93d2b9657fb141a09bce8805ac582e306da519802737dc711e10959f"
+        }
+      },
+      "notes": [
+        "tabby-webviewer 0.4.14 @94dcd578\n录制器 Network 页签：结构化 JSON 展示与请求内容搜索。\n\n## 新功能\n\n- **展开请求时的结构化 JSON**：请求体 / 响应体为 JSON（对象或数组）时，自动\n  美化缩进（2 空格）并做 token 着色——键名（青）、字符串（绿）、数字（琥珀）、\n  true/false/null（紫）；非 JSON 内容保持原文显示",
+        "tabby-hotkey-guard 0.2.1 @b7eeb41e",
+        "tabby-glass-theme 0.5.0 @1dd26b29",
+        "tabby-output-filter 0.5.7 @2848afc7",
+        "tabby-better-configer 0.4.0 @55ce6326",
+        "tabby-terminal-workwench 0.2.5 @3f82416c\n- JS 块健壮性：异步返回值（Promise）不再静默变空，而是明确报错并中止；错误消息携带块序号与源码摘录（多块片段可定位）；同源码编译结果缓存（重复执行免重编译）。\n- 片段编辑器新增「模板语法说明」专页（入口按钮位于插入按钮组内，替换原单行提示）：参数 / 延时 / 文件 / JS 四类块的完整语法、上下文变量与成员参考表、可复制示例（含「看输出 → 提取 → 组命令」闭环用法）。\n- 设置页片段行的动作类型改为图标 + 悬停提示：填充（文本光标）/ 发送（播放 ▶）/ 复制（复制）/ 高危（警告三角），替代原文字徽章；悬停显示完整类型说明。\n- 设置页场景行的「使用中」徽章改为自绘样式（着色描边 + 浅底胶囊，替代 bootstrap 实底徽章），深色主题下对比度更好。\n- 修复侧栏目标显示不跟随焦点：补充 Split 窗格焦点切换事件（SplitTabComponent.focusChanged$）与全局 focusin 兜底（120ms 防抖）驱动目标刷新——此前同一 Split 内切换窗格或部分焦点移动不会触发刷新，目标停留在最后挂载的窗格（如新建的那个）而非当前激活窗格。",
+        "tabby-activx-rdp-client 0.1.0 @4f53b568",
+        "tabby-mux 0.1.0 @38c8b405"
+      ],
+      "releasedAt": "2026-11-26T18:16:09.186Z"
     }
   },
   "baseUrl": "https://github.com/MintSpearCandy/TabbySuite/releases/download"
