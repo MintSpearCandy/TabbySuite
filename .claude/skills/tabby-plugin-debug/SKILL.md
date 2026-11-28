@@ -64,10 +64,10 @@ description: 调试 Tabby 终端插件（tabby-webviewer / tabby-output-filter /
 **为何实例必须是完整 exe 副本**（实证）：便携模式强制 userData = exe 旁 `data\`（`--user-data-dir` 不改变 Tabby 的 portable 判定），单实例锁在共享 userData 上——已有实例运行时，新启动只做参数转发然后退出（log `secondInstance: true`）。**唯一共存隔离法 = 每实例完整拷贝 + 各自 data\**。
 
 ### 入口：suitectl verify（本仓标准路径）
-`node tools/suitectl/cli.js build && node tools/suitectl/cli.js verify` —— 自动拷贝 stage 到 `runtime/instance/`、bind 探测端口、带日志启动、断言插件全载/探针；**失败保留现场**（实例目录 + `runtime/instance-boot.err`），按 §四 进现场定位。
+`node tools/suitectl/cli.js build && node tools/suitectl/cli.js verify` —— 自动拷贝 stage 到 `.work/instance/`、bind 探测端口、带日志启动、断言插件全载/探针；**失败保留现场**（实例目录 + `.work/instance-boot.err`），按 §四 进现场定位。
 
 ### 手工启动配方（verify 之外的自由实验）
-1. 完整拷贝一份 core（vendor zip 解包或既有实例复制）到独立目录
+1. 完整拷贝一份平台（platform/ 下的官方 zip 解包或既有实例复制）到独立目录
 2. **端口先 bind 探测再使用**：Windows 保留段随重启漂移（实证见过 9249–9348 整段不可绑），bind 报 `WSAEACCES (0x271D)`；Node 一行探测：
    ```js
    const s=require('net').createServer();s.once('error',()=>/*换一个*/);s.listen(PORT,'127.0.0.1',()=>s.close(()=>/*可用*/))
@@ -113,4 +113,4 @@ cd components/<dir> && node scripts/smokeLoad.js   # WebViewer / HotkeyGuard / B
 
 ## 五、环境事实入口
 
-本机实例清单/端口现状/绝对路径/用户热键 → 用户级 tabby-debug skill 的 `ENVIRONMENT.md`（易变层，环境变化只更新它）。本仓相关：插件源码 `components/<dir>`、**Tabby 核心源码 `reference/tabby`（shallow 子仓，与构建 core 同版——查核心实现的第一入口，`.ts` 原文可读）**、core 构建原件 `vendor/*.zip`（hash 见 `vendor/index.json`）、运行时形态参考 = 任意解包实例内 `resources/builtin-plugins/<包>/dist/index.js`（未压缩 dist，可 grep）。
+本机实例清单/端口现状/绝对路径/用户热键 → 用户级 tabby-debug skill 的 `ENVIRONMENT.md`（易变层，环境变化只更新它）。本仓相关：插件源码 `components/<dir>`、**Tabby 核心源码 `platform/reference/tabby`（按需检出 `suitectl platform ref`，与构建平台同版——查核心实现的第一入口，`.ts` 原文可读）**、平台构建原件 `platform/*.zip`（hash 见 `platform/index.json`）、运行时形态参考 = 任意解包实例内 `resources/builtin-plugins/<包>/dist/index.js`（未压缩 dist，可 grep）。

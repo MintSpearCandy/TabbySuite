@@ -1,202 +1,253 @@
 'use strict';
-// 平台能力适配层 —— tar 打包/解包、curl 下载（代理一等公民）、PowerShell 进程管理、npm、CDP 端口。
-// 流水线代码只调用本层语义，不直接拼 "powershell" / "cmd.exe" / "tar" / "curl"。
-//
-// 打包引擎（v2 决策）：系统 tar（Windows 10+/macOS 均为 bsdtar，按扩展名写 zip），
-//   替代 Compress-Archive——后者会静默丢弃隐藏文件、PS5.1 下 entry 分隔符非标。
-//   Linux GNU tar 不识 zip → 回退 unzip/zip CLI，suitectl env 预检报能力。
-// zip 形态统一为"带顶层目录"（-C <parent> <name>）：套件 zip 解压出 tabby-suite/，插件 zip 解压出 <pkg>/。
+// 平台组件（platform）：Tabby core 作为套件的宿主平台 —— 版本管理 + 官方 zip 获取/校验/登记 + 源码参考。
+// v4 由 core.js + vendor.js 合并而成：套件 = 平台组件（官方 zip，版本可切换，原样分发）+ 插件组件（components/ 子仓）。
+//   - bundle.yaml platform: { version, pin }（pin:auto 时 up 自动前进并回写；release 钉定落库）
+//   - platform/index.json 只记"内容事实"（file 相对名 / sha256 / origin），不记本机绝对路径；
+//     未登记版本按官方 Releases 直链下载，sha256 算得后自动登记（信任锚 = GitHub 官方 Releases）
+//   - platform/reference/tabby 源码参考为**按需检出**（非子仓，gitignore）：suitectl platform ref
+// 线上格式（channel.json / suite.json）仍用字段名 core —— 目标机 ps1 更新器与既有安装不受本层重命名影响。
 const fs = require('fs');
 const path = require('path');
-const net = require('net');
-const { spawn } = require('child_process');
-const { cfg } = require('./config');
+const { cfg, P } = require('./config');
 const U = require('./util');
+const sys = require('./sys');
 
-const win = process.platform === 'win32';
+const OFFICIAL_REPO = 'Eugeny/tabby';
+const OFFICIAL_URL = `https://github.com/${OFFICIAL_REPO}.git`;
+const ASSET_RE = /^tabby-(\d+\.\d+\.\d+)-portable-x64\.zip$/;
 
-function exeName() {
-  if (!cfg.platform.exe) {
+// ---- index.json（platform/ 固定在仓库内；zip 存放目录可经 paths.platformZips 移出）----
+function loadIndex() {
+  if (!fs.existsSync(P.platformIndex)) {
+    throw new Error(`platform/index.json 缺失（${P.platformIndex}）—— 仓库不完整？`);
+  }
+  return U.readJson(P.platformIndex);
+}
+
+function entryFor(version) {
+  const entry = loadIndex().zips?.[version];
+  if (!entry) {
+    throw new Error(`platform/index.json 未登记平台版本 ${version} —— 用 suitectl platform use ${version} 自动下载登记`);
+  }
+  return entry;
+}
+
+function zipPath(version, entry = entryFor(version)) {
+  const file = entry.file || `tabby-${version}-portable-x64.zip`;
+  return path.isAbsolute(file) ? file : path.join(P.platformZips, file);
+}
+
+// 下载地址：显式 download 优先；否则由 GitHub release tag 页地址推导资产直链
+function downloadUrl(version, entry) {
+  if (entry.download) return entry.download;
+  const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/tag\/(.+)$/.exec(entry.origin || '');
+  if (!m) return null;
+  const asset = entry.asset || path.basename(zipPath(version, entry));
+  return `https://github.com/${m[1]}/${m[2]}/releases/download/${m[3]}/${asset}`;
+}
+
+function verifySha(file, expected) {
+  const sha = U.sha256(file);
+  if (expected && sha !== expected) {
+    throw new Error(`平台 zip sha256 不符: ${file}\n  期望 ${expected}\n  实得 ${sha}`);
+  }
+  return sha;
+}
+
+// 下载（curl，代理见环境配置 net.proxy / TABBYSUITE_PROXY）→ sha256 校验 → 原子就位
+function download(url, dest, expectedSha) {
+  console.log(`[platform] 下载 ${url}${cfg.net.proxy ? `（代理 ${cfg.net.proxy}）` : ''}`);
+  sys.fetchUrl(url, dest);
+  const sha = verifySha(`${dest}`, expectedSha); // fetchUrl 已原子 rename 到 dest
+  console.log(`[platform] ✓ ${path.basename(dest)}（sha256 ${sha.slice(0, 12)}…）`);
+  return sha;
+}
+
+// 登记新版本（自动下载路径）：index.json 保持键排序，diff 友好
+function register(version, { file, sha256, origin }) {
+  const idx = loadIndex();
+  idx.zips = idx.zips || {};
+  idx.zips[version] = { file, sha256, origin };
+  idx.zips = Object.fromEntries(Object.entries(idx.zips).sort(([a], [b]) => U.cmpSemver(a, b)));
+  U.writeJson(P.platformIndex, idx);
+  console.log(`[platform] 已登记平台版本 ${version} → platform/index.json`);
+}
+
+// ---- 官方最新版查询（GitHub API，只读）：{ version, url, tag } | null ----
+async function githubLatest() {
+  const rel = sys.getJson(`https://api.github.com/repos/${OFFICIAL_REPO}/releases/latest`, { timeoutSec: 30 });
+  const tag = rel.tag_name || '';
+  const m = /^v?(\d+\.\d+\.\d+)$/.exec(tag);
+  const asset = (rel.assets || []).find(a => ASSET_RE.test(a.name) && ASSET_RE.exec(a.name)[1] === (m ? m[1] : ''));
+  if (!m || !asset) return null;
+  return { version: m[1], url: asset.browser_download_url, tag: `v${m[1]}` };
+}
+
+// 官方是否有比 version 更新的版本（离线/查询失败 → null，视作"无更新"并提示）
+async function officialNewerThan(version) {
+  try {
+    const latest = await githubLatest();
+    if (!latest) return null;
+    if (U.cmpSemver(latest.version, version) <= 0) return null;
+    return latest;
+  } catch (e) {
+    console.log(`[platform] ⚠ 官方最新版查询失败（${String(e.message).split('\n')[0]}）—— 保持 ${version} 继续`);
+    return null;
+  }
+}
+
+// 返回 { version, file, sha256, origin }；缺失且允许联网时自动下载
+async function ensureZip(version, opts = {}) {
+  const entry = loadIndex().zips?.[version];
+  const file = entry ? zipPath(version, entry) : path.join(P.platformZips, `tabby-${version}-portable-x64.zip`);
+  const offline = opts.offline ?? !cfg.platform.autoDownload;
+
+  if (entry && fs.existsSync(file) && !opts.force) {
+    return { version, file, sha256: verifySha(file, entry.sha256), origin: entry.origin };
+  }
+  if (offline) {
     throw new Error(
-      `当前平台 ${cfg.platform.id} 未配置可执行文件名 —— 在 suitectl.local.yaml 的 platform.exe 指定（如 Tabby.exe）`
+      `平台 zip 缺失: ${file}\n  → 联网运行 node tools/suitectl/cli.js platform use ${version}，或按 platform/index.json 的 origin 手工放入该位置（--offline 可跳过自动下载）`
     );
   }
-  return cfg.platform.exe;
+  // 未登记的版本：按官方 Releases 直链下载（tag 命名稳定），sha256 算得后登记
+  const url = entry ? downloadUrl(version, entry)
+    : `https://github.com/${OFFICIAL_REPO}/releases/download/v${version}/${path.basename(file)}`;
+  const sha = download(url, file, entry?.sha256);
+  if (!entry) register(version, { file: path.basename(file), sha256: sha, origin: `https://github.com/${OFFICIAL_REPO}/releases/tag/v${version}` });
+  return { version, file, sha256: sha, origin: entry?.origin };
 }
 
-function exePath(dir) { return path.join(dir, exeName()); }
-
-function hasExe(dir) {
-  try { return fs.existsSync(exePath(dir)); } catch { return false; }
-}
-
-function assertExe(dir, what = 'core') {
-  if (!hasExe(dir)) {
-    throw new Error(
-      `${what} 目录未见 ${exeName()}（${dir}）—— core zip 结构异常，或 suitectl.local.yaml 的 platform.exe 与本机包不符`
-    );
-  }
-}
-
-function psQuote(s) { return `'${String(s).replace(/'/g, "''")}'`; }
-
-function powershell(command, opts = {}) {
-  if (!cfg.platform.powershell) {
-    throw new Error(
-      `当前平台 ${cfg.platform.id} 未配置 PowerShell 能力（进程管理/更新器依赖它）—— 在 suitectl.local.yaml 配置 platform.powershell`
-    );
-  }
-  return U.run(cfg.platform.powershell, ['-NoProfile', '-Command', command], opts);
-}
-
-function npm(args, opts = {}) {
-  if (win && cfg.platform.npmShell) {
-    return U.run(cfg.platform.npmShell, ['/d', '/s', '/c', `npm ${args.join(' ')}`], opts);
-  }
-  return U.run('npm', args, opts);
-}
-
-// ---- tar 能力探测（惰性缓存）----
-// Windows 显式优先 System32 的 bsdtar——PATH 前部的 Git Bash GNU tar 不识 zip
-const TAR_BIN = win
-  ? (fs.existsSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'))
-      ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe')
-      : 'tar')
-  : 'tar';
-let tarFlavor; // 'bsd' | 'gnu' | null
-function tarFlavorProbe() {
-  if (tarFlavor !== undefined) return tarFlavor;
-  const r = U.run(TAR_BIN, ['--version'], { ok: true, capture: true });
-  const v = ((r.stdout || '') + (r.stderr || '')).toString();
-  tarFlavor = /bsdtar|libarchive/i.test(v) ? 'bsd' : (r.status === 0 ? 'gnu' : null);
-  return tarFlavor;
-}
-
-// zip：<srcDir> 以其 basename 为顶层目录压入 <zipPath>（含隐藏文件；bsdtar 通配符无关）
-function zipDir(srcDir, zipPath) {
-  fs.mkdirSync(path.dirname(zipPath), { recursive: true });
-  fs.rmSync(zipPath, { force: true });
-  const name = path.basename(srcDir);
-  const parent = path.dirname(srcDir);
-  if (tarFlavorProbe() === 'bsd') {
-    U.run(TAR_BIN, ['-a', '-c', '-f', zipPath, '-C', parent, name]);
+// ---- 源码参考（按需检出，非子仓）：platform/reference/tabby @ v<版本> ----
+function refCommand(bundle) {
+  const version = bundle.platform.version;
+  const dir = P.platformReference;
+  if (!fs.existsSync(path.join(dir, '.git'))) {
+    console.log(`[platform] 克隆核心源码参考 → ${path.relative(P.root, dir)}（shallow @v${version}，按需检出非子仓）`);
+    fs.mkdirSync(path.dirname(dir), { recursive: true });
+    U.git(['clone', '--depth', '1', '--branch', `v${version}`, OFFICIAL_URL, dir]);
   } else {
-    // GNU tar 无 zip 能力 → 回退 zip CLI（Linux）
-    if (!commandPath('zip')) {
-      throw new Error('本机 tar 非 bsdtar（GNU tar 不支持 zip）且未找到 zip CLI —— Windows/macOS 自带 bsdtar；Linux 请安装 libarchive 或 zip');
+    U.git(['-C', dir, 'fetch', '--depth', '1', 'origin', 'tag', `v${version}`], { ok: true });
+    U.git(['-C', dir, 'checkout', '--detach', `v${version}`]);
+  }
+  console.log(`[platform] 源码参考 @v${version} ✓（查核心内部实现优先读它；平台前进后 platform ref 重钉）`);
+}
+
+// platform use 的完整动作：确保 zip → 登记 → 改 bundle → 重钉源码参考（如已检出）
+async function platformUse(bundle, version, opts = {}) {
+  const hit = await ensureZip(version, { offline: opts.offline });
+  console.log(`[platform] ${version} 就绪（sha256 ${hit.sha256.slice(0, 12)}…）`);
+  if (bundle.platform.version !== version) {
+    writeBundlePlatformVersion(version);
+    console.log(`[platform] bundle.yaml platform.version: ${bundle.platform.version} → ${version}`);
+    bundle.platform.version = version; // 就地更新，供同进程后续使用
+  }
+  repinReference(version);
+  console.log('[platform] 下一步：suitectl up（构建+门禁）—— 平台变更走整包路径，verify 必跑');
+}
+
+async function platformCommand(bundle, args, opts = {}) {
+  const sub = args[0];
+  const pinned = bundle.platform.pin && bundle.platform.pin !== 'auto';
+  if (sub === 'list') return listCommand(bundle);
+  if (sub === 'ref') return refCommand(bundle);
+  if (sub === 'latest' || (sub === 'use' && args[1] === 'latest')) {
+    const latest = await githubLatest();
+    if (!latest) throw new Error('官方 Releases 未找到 portable-x64 资产（tag 命名变化？）');
+    console.log(`[platform] 官方最新 ${latest.version}（${latest.tag}）`);
+    console.log(`[platform] 当前构建 ${bundle.platform.version}${pinned ? `（pin 锁定 ${bundle.platform.pin}）` : ''}`);
+    if (sub === 'latest') {
+      const d = U.cmpSemver(latest.version, bundle.platform.version);
+      console.log(`[platform] ${d > 0 ? '有更新' : d === 0 ? '已最新' : '本地领先（预发布/回退?）'}${d > 0 ? ` —— suitectl platform use ${latest.version} 前进` : ''}`);
+      return;
     }
-    U.run('zip', ['-r', '-q', zipPath, name], { cwd: parent });
+    await platformUse(bundle, latest.version, opts);
+    return;
   }
-}
-
-function unzip(zipPath, dstDir) {
-  fs.mkdirSync(dstDir, { recursive: true });
-  if (tarFlavorProbe() === 'bsd') {
-    U.run(TAR_BIN, ['-x', '-f', zipPath, '-C', dstDir]);
-  } else if (commandPath('unzip')) {
-    U.run('unzip', ['-q', '-o', zipPath, '-d', dstDir]);
-  } else {
-    throw new Error('本机 tar 非 bsdtar（GNU tar 不能解 zip）且未找到 unzip —— 安装 libarchive 或 unzip');
+  if (sub === 'use') {
+    const version = args[1];
+    if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+      throw new Error('用法: platform use <x.y.z>|latest');
+    }
+    await platformUse(bundle, version, opts);
+    return;
   }
-}
-
-// ---- 网络（curl：-x 原生代理，绕开 Node fetch 不认 HTTP_PROXY 的限制）----
-function proxyArgs() {
-  return cfg.net.proxy ? ['-x', cfg.net.proxy] : [];
-}
-
-// 下载到 dest（dest.part → 校验 → rename 由调用方/或在此完成）。进度走 stderr 直通。
-function fetchUrl(url, dest, opts = {}) {
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  const tmp = `${dest}.part`;
-  fs.rmSync(tmp, { force: true });
-  U.run('curl', [
-    '-L', '--fail', '--retry', '3', '--connect-timeout', '20',
-    '--max-time', String(opts.timeoutSec || cfg.vendor.downloadTimeoutSec),
-    ...proxyArgs(), '-o', tmp, url,
-  ]);
-  fs.renameSync(tmp, dest);
-  return dest;
-}
-
-// GET JSON（GitHub API 等）；GitHub API 必须带 UA
-function getJson(url, opts = {}) {
-  const args = ['-sS', ...proxyArgs()];
-  if (/api\.github\.com/.test(url)) args.push('-H', 'User-Agent: suitectl (TabbySuite)');
-  if (opts.timeoutSec) args.push('--max-time', String(opts.timeoutSec));
-  args.push(url);
-  const out = U.out('curl', args);
-  try { return JSON.parse(out); } catch {
-    throw new Error(`响应不是 JSON: ${url}\n${out.slice(0, 300)}`);
+  if (sub === 'fetch') {
+    const hit = await ensureZip(args[1] || bundle.platform.version, { force: opts.force });
+    console.log(`[platform] 平台 ${hit.version} 就绪: ${hit.file}`);
+    return;
   }
+  throw new Error('platform 子命令: list（登记与缓存状态）| latest（查官方最新）| use <版本>|latest（前进并登记）| fetch [版本] [--force] | ref（按需检出源码参考）');
 }
 
-// gh CLI 调用（release 上传）——代理经 util.run 的统一环境注入（HTTPS_PROXY）生效
-function gh(args, opts = {}) {
-  return U.run('gh', args, opts);
-}
-
-// ---- 进程管理（按可执行文件路径前缀匹配，绝不误杀其它 Tabby 实例）----
-function killUnder(dir) {
-  if (win) {
-    if (!cfg.platform.powershell) return;
-    powershell(
-      `Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -like ${psQuote(dir + path.sep + '*')} } | Stop-Process -Force`,
-      { ok: true }
-    );
-  } else {
-    U.run('sh', ['-c', `ps -eo pid=,args= | grep -F ${JSON.stringify(dir)} | grep -v grep | awk '{print $1}' | xargs -r kill`], { ok: true });
+// 只改 bundle.yaml 中 platform: 下的 version 行，保留注释与其余内容（js-yaml 往返会丢注释，故行级替换）
+function writeBundlePlatformVersion(version) {
+  const lines = fs.readFileSync(P.bundle, 'utf8').split('\n');
+  let inBlock = false, done = false;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^platform:\s*$/.test(l)) { inBlock = true; continue; }
+    if (inBlock && /^\S/.test(l)) break; // 离开 platform: 块
+    if (inBlock && /^(\s+)version:\s*\S+/.test(l) && !done) {
+      lines[i] = l.replace(/^(\s+)version:\s*\S+/, `$1version: ${version}`);
+      done = true;
+    }
   }
+  if (!done) throw new Error('bundle.yaml 中未找到 platform.version —— 结构异常');
+  fs.writeFileSync(P.bundle, lines.join('\n'));
 }
 
-function countUnder(dir) {
-  if (win) {
-    if (!cfg.platform.powershell) return 0;
-    const r = U.run(cfg.platform.powershell, ['-NoProfile', '-Command',
-      `@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -like ${psQuote(dir + path.sep + '*')} }).Count`],
-    { ok: true, capture: true });
-    return parseInt((r.stdout || '').toString().trim(), 10) || 0;
+// reference 重钉到 v<version>（浅取 tag；未检出不阻路，提示按需命令）
+function repinReference(version) {
+  if (!fs.existsSync(path.join(P.platformReference, '.git'))) {
+    console.log('[platform] 源码参考未检出，跳过重钉（需要时：suitectl platform ref）');
+    return;
   }
-  const r = U.run('sh', ['-c', `ps -eo args= | grep -F ${JSON.stringify(dir)} | grep -v grep | wc -l`], { ok: true, capture: true });
-  return parseInt((r.stdout || '').toString().trim(), 10) || 0;
+  U.git(['-C', P.platformReference, 'fetch', '--depth', '1', 'origin', `tag`, `v${version}`], { ok: true });
+  U.git(['-C', P.platformReference, 'checkout', '--detach', `v${version}`]);
+  console.log(`[platform] 源码参考 → v${version}（gitignore，不入库——按需检出）`);
 }
 
-function launchDetached(dir, args = []) {
-  const child = spawn(exePath(dir), args, { cwd: dir, detached: true, stdio: 'ignore' });
-  child.on('error', () => { /* 已由调用方的就绪探测兜底 */ });
-  child.unref(); // 长驻：CLI 退出后实例继续运行
-  return child;
+// up 编排用：pin:auto 且官方更新可用时自动前进；否则零动作。
+// 返回 { advanced, version? }（advanced = 平台是否前进）。
+async function ensureLatestPlatform(bundle, opts = {}) {
+  if (opts.offline) {
+    console.log('[platform] --offline 跳过查新');
+    return { advanced: false };
+  }
+  if (bundle.platform.pin && bundle.platform.pin !== 'auto') {
+    console.log(`[platform] pin 锁定 ${bundle.platform.pin}，不自动前进（platform use 可显式前进）`);
+    return { advanced: false };
+  }
+  const newer = await officialNewerThan(bundle.platform.version);
+  if (!newer) { console.log(`[platform] ${bundle.platform.version} 已是官方最新（或查询不可用）`); return { advanced: false }; }
+  console.log(`[platform] 官方有新版 ${newer.version} —— 自动前进`);
+  await platformUse(bundle, newer.version, opts);
+  return { advanced: true, version: newer.version };
 }
 
-function commandPath(cmd) {
-  const r = win
-    ? U.run('cmd.exe', ['/d', '/s', '/c', `where ${cmd}`], { ok: true, capture: true })
-    : U.run('sh', ['-c', `command -v ${cmd}`], { ok: true, capture: true });
-  const out = (r.stdout || '').toString().trim();
-  return r.status === 0 && out ? out.split(/\r?\n/)[0] : null;
-}
-
-function cdpPorts() {
-  const [a, b] = cfg.ports.cdp;
-  return Array.from({ length: b - a + 1 }, (_, i) => a + i);
-}
-
-function probePort(cands) {
-  return new Promise(resolve => {
-    const tryNext = i => {
-      if (i >= cands.length) return resolve(null);
-      const s = net.createServer();
-      s.once('error', () => tryNext(i + 1));
-      s.listen(cands[i], '127.0.0.1', () => s.close(() => resolve(cands[i])));
-    };
-    tryNext(0);
-  });
+// 登记与缓存总览（原 vendor status）：当前构建版本打标，缺失/损坏一目了然
+function listCommand(bundle) {
+  const idx = loadIndex();
+  const current = bundle.platform.version;
+  const rows = Object.entries(idx.zips || {});
+  if (!rows.length) return console.log('[platform] index 无条目');
+  for (const [version, entry] of rows) {
+    const file = zipPath(version, entry);
+    const present = fs.existsSync(file);
+    let shaOk = null;
+    if (present && entry.sha256) {
+      try { shaOk = verifySha(file, entry.sha256) === entry.sha256; } catch { shaOk = false; }
+    }
+    const state = !present ? '缺失' : shaOk === false ? 'sha256 不符' : '就绪';
+    const mark = version === current ? '  ← 当前构建' : '';
+    console.log(`  ${version.padEnd(10)} ${state.padEnd(10)} ${file}${mark}`);
+    if (!present) console.log(`    下载: ${downloadUrl(version, entry) || '（无直链，需在 index.json 补 download）'}`);
+  }
 }
 
 module.exports = {
-  win, exeName, exePath, hasExe, assertExe, psQuote,
-  powershell, npm, zipDir, unzip, tarFlavorProbe,
-  fetchUrl, getJson, gh, proxyArgs,
-  killUnder, countUnder, launchDetached,
-  commandPath, cdpPorts, probePort,
+  loadIndex, entryFor, zipPath, downloadUrl, register, githubLatest, officialNewerThan,
+  ensureZip, ensureLatestPlatform, listCommand, refCommand, platformCommand,
+  writeBundlePlatformVersion, repinReference, OFFICIAL_REPO,
 };

@@ -1,6 +1,6 @@
 'use strict';
 // 目录树规范化 hash —— 安装态完整性核对（doctor）与"verify 测的树 == release 压的树"绑定的基础。
-// 算法（Node 与 suite-tools/suitectl.ps1 两侧必须严格一致）：
+// 算法（Node 与分发物内 suite-tools/suitectl.ps1 两侧必须严格一致；仓库侧源码在 tools/updater/）：
 //   收集目录下全部文件（跳过 exclude 的顶层条目）；
 //   每文件一行 "<文件sha256小写hex>  <相对路径 posix 分隔>"，按路径 ordinal 排序；
 //   全部行以 "\n" 结尾连接成 utf8 文本；treeHash = sha256(该文本)。

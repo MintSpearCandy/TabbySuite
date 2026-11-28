@@ -1,6 +1,6 @@
 'use strict';
 // suitectl 通用原语：进程封装、hash、JSON/FS 助手、版本比较。
-// 路径表与环境配置在 config.js；平台相关能力（tar/curl/PowerShell/npm/进程）在 platform.js。
+// 路径表与环境配置在 config.js；宿主系统能力（tar/curl/PowerShell/npm/进程）在 sys.js；平台组件域在 platform.js。
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -79,8 +79,8 @@ function rmrf (p) {
 function stamp() { return new Date().toISOString(); }
 
 // 同卷树克隆：优先硬链接（零拷贝省盘），失败退化为复制。
-// ⚠ 铁律：硬链共享 inode 与文件锁——只用于"永不被执行/写入"的树（core-cache → stage）；
-//   会被执行的副本（dev 实例、verify 实例）必须 fs.cpSync 实拷。
+// ⚠ 铁律：硬链共享 inode 与文件锁——只用于"永不被执行/写入"的树（platform-cache → stage）；
+//   会被执行的副本（verify 实例）必须 fs.cpSync 实拷。
 function cloneTree (src, dst) {
   fs.mkdirSync(dst, { recursive: true });
   for (const e of fs.readdirSync(src, { withFileTypes: true })) {

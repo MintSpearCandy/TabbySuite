@@ -5,7 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const U = require('./util');
-const platform = require('./platform');
+const sys = require('./sys');
 const { treeHash } = require('./hash');
 const { cfg, P } = require('./config');
 const { candidateVersion } = require('./build');
@@ -31,8 +31,8 @@ function extractNotes (dir, version) {
 }
 
 function releaseCommand(bundle, opts = {}) {
-  const ver = candidateVersion(bundle.core.version);
-  if (!fs.existsSync(P.buildReport)) throw new Error('无 build/build-report.json —— 先 suitectl build');
+  const ver = candidateVersion(bundle.platform.version);
+  if (!fs.existsSync(P.buildReport)) throw new Error('无 .work/build-report.json —— 先 suitectl build');
   const report = U.readJson(P.buildReport);
   if (report.suiteVersion !== ver) {
     throw new Error(`build-report(${report.suiteVersion}) 与候选版本(${ver}) 不一致 —— 重新 build`);
@@ -53,10 +53,9 @@ function releaseCommand(bundle, opts = {}) {
 
   // 门禁 2：verify 绿 + 测的树 == 将要压的树（stageTreeHash 绑定）
   if (!opts.noVerify) {
-    const passedPath = path.join(P.build, '.verify-passed');
-    const passed = fs.existsSync(passedPath) ? U.readJson(passedPath) : null;
+    const passed = fs.existsSync(P.verifyPassed) ? U.readJson(P.verifyPassed) : null;
     if (!passed || passed.suiteVersion !== ver) {
-      throw new Error(`verify 未通过或过期（无 ${ver} 的 build/.verify-passed）—— 先 suitectl verify，或 --no-verify 显式跳过`);
+      throw new Error(`verify 未通过或过期（无 ${ver} 的 .work/.verify-passed）—— 先 suitectl verify，或 --no-verify 显式跳过`);
     }
     const current = treeHash(report.stageDir);
     if (passed.stageTreeHash && passed.stageTreeHash !== current) {
@@ -93,7 +92,7 @@ function releaseCommand(bundle, opts = {}) {
   const zipName = `tabby-suite-${ver}-portable-x64.zip`;
   const zipPath = path.join(P.releases, zipName);
   console.log(`[release] 压缩 ${zipName}`);
-  platform.zipDir(report.stageDir, zipPath);
+  sys.zipDir(report.stageDir, zipPath);
   const sha = U.sha256(zipPath);
 
   // SHA256SUMS：累积多版本（按文件名排序），重发同版本则覆盖该行
@@ -140,9 +139,10 @@ function releaseCommand(bundle, opts = {}) {
   }
   fs.writeFileSync(path.join(P.releases, 'CHANGELOG.md'), md);
 
-  // 发布即锁：gitlink 漂移（components + reference/tabby）+ bundle + releases 产物 → 一个 commit + tag
+  // 发布即锁：gitlink 漂移（components）+ bundle + 平台版本登记（index.json 随 core 前进被 up 改写，必须一并钉定）
+  //   + releases 产物 → 一个 commit + tag
   if (!opts.noTag && !opts.noGit) {
-    U.git(['add', 'bundle.yaml', 'components', 'reference/tabby',
+    U.git(['add', 'bundle.yaml', 'components', 'platform/index.json',
       path.join(relDir, 'SHA256SUMS'), path.join(relDir, 'update-channel.json'), path.join(relDir, 'CHANGELOG.md')]);
     const staged = U.gitOut(['diff', '--cached', '--name-only'], { ok: true });
     if (staged) U.git(['commit', '-m', `release: ${ver}`]);
@@ -153,7 +153,7 @@ function releaseCommand(bundle, opts = {}) {
 
   // 上传 GH Releases（gh CLI；代理注入 HTTPS_PROXY）。资产：全量 zip + 每插件 zip + channel.json
   if (!opts.noUpload) {
-    if (!platform.commandPath('gh')) {
+    if (!sys.commandPath('gh')) {
       console.log('[release] ⚠ 未找到 gh CLI，跳过上传（本地产物已就绪）—— 安装 GitHub CLI 后可 gh release upload 补传');
     } else {
       const files = [zipPath, P.channel, ...report.components.map(c => c.zip)];
@@ -161,7 +161,7 @@ function releaseCommand(bundle, opts = {}) {
       const notes = report.components.map(c => `- ${c.name} ${c.version} @${c.commit.slice(0, 8)}`).join('\n');
       console.log(`[release] 上传 ${files.length} 个资产到 GitHub Releases…`);
       try {
-        platform.gh(['release', 'create', `suite/${ver}`, '--title', title, '--notes', notes, ...files]);
+        sys.gh(['release', 'create', `suite/${ver}`, '--title', title, '--notes', notes, ...files]);
         console.log(`[release] ✓ https://github.com/${cfg.dist.repo}/releases/tag/suite/${ver}`);
       } catch (e) {
         throw new Error(`上传失败：${String(e.message).split('\n')[0]}\n  → release 若已存在可补传: gh release upload suite/${ver} ${files.map(f => `"${f}"`).join(' ')} --clobber`);

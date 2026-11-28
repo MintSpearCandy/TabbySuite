@@ -1,26 +1,23 @@
 suite:
   name: tabby-suite
-core:
-  version: 1.0.238        # 当前构建 core（pin:auto 时 up 自动前进并回写此处；随 release 钉定落库）
-  pin: auto               # auto=跟随官方最新 | 写死版本=锁定不自动前进
+platform:                       # 平台组件（Tabby 宿主）：官方 portable zip 原样分发，版本可切换
+  version: 1.0.238              # 当前构建平台版本（pin:auto 时 up 自动前进并回写此处；随 release 钉定落库）
+  pin: auto                     # auto=跟随官方最新 | 写死版本=锁定不自动前进
 profile: base
-integrate:                       # 参与集成的子仓；日常浮动（sync 拉最新直接构建），发布时 release 钉定 gitlink
+integrate:                      # 插件组件：参与集成的子仓；日常浮动（sync 拉最新直接构建），发布时 release 钉定 gitlink
   [WebViewer, HotkeyGuard, GlassTheme, Filter, BetterConfiger, TerminalWorkwench, ActivxRDPClient, TabbyMux]
-exclude: [tabby-command-workbench]   # 已收编不集成（第三方，与 TerminalWorkwench 互斥）
-payload:                         # 规范工件 {package.json, dist, README} 之外的附加载荷（目录/文件，随 zip 与 stage 同步）
-  ActivxRDPClient: [native]      # 含 rdp_host.node（prebuilt N-API addon）+ C++ 源码
-install:                         # npm install 覆盖（旧代工具链需放宽 peer 解析）
+# 备忘：tabby-command-workbench（第三方）曾收编但因与 TerminalWorkwench 互斥已移除——如需引入先解决互斥
+payload:                        # 规范工件 {package.json, dist, README} 之外的附加载荷（目录/文件，随 zip 与 stage 同步）
+  ActivxRDPClient: [native]     # 含 rdp_host.node（prebuilt N-API addon）+ C++ 源码
+install:                        # npm install 覆盖（旧代工具链需放宽 peer 解析）
   WebViewer: { flags: [--legacy-peer-deps] }
   Filter: { flags: [--legacy-peer-deps] }
   HotkeyGuard: { flags: [--legacy-peer-deps] }
   ActivxRDPClient: { flags: [--legacy-peer-deps] }
-probes:                          # verify ③：渲染层 CDP 探针（expr 求值结果须 === expect）
+probes:                         # verify ③：渲染层 CDP 探针（expr 求值结果须 === expect）
   GlassTheme:
     - { expr: "!!window.__glassConfig && !!document.querySelector('style#glass-vars')", expect: "true" }
     - { expr: "window.__glassConfig ? window.__glassConfig.store.appearance.theme : 'no-cfg'", expect: "Glass" }
-regression:                      # verify ④：仓库自带回归挂钩（CDP_PORT 注入；enabled 才跑）
+regression:                     # verify ④：仓库自带回归挂钩（CDP_PORT 注入；enabled 才跑）
   WebViewer:
     { script: recorderTest.js, cwd: WebViewer/scripts, enabled: false }   # 依赖 wv 实例 fixture 基线，种子化后启用
-rules:
-  mutuallyExclusive:
-    - [tabby-terminal-workwench, tabby-command-workbench]

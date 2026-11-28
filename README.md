@@ -1,12 +1,10 @@
 # TabbySuite
 
-[Tabby](https://github.com/Eugeny/tabby) 集成总装仓库：**core + 插件套件的构建 / 验证 / 发布 / 滚动更新**——一条命令得到开箱即用的便携版 Tabby 套件。
+[Tabby](https://github.com/Eugeny/tabby) 集成发布仓：**只做「集成 → 验证 → 发布」**——把官方平台（Tabby core 便携版，版本可切换）+ 7 个自研插件组件组装成开箱即用的套件并发布 GitHub Releases。插件开发在各插件独立仓进行（见 `.gitmodules` 与 [PLUGIN_CONTRACT.md](PLUGIN_CONTRACT.md)），本仓不含开发轨道。
 
-- 官方 core zip **原样分发**（一字不动），定制只进 `data/`（配置种子 + 插件）与 `suite-tools/`（更新器）
-- 8 个插件以 git submodule 收编在 `components/`：日常浮动跟随各仓最新，`release` 时自动钉定——任意历史版本可冷复原
-- 自带目标机更新器：插件级增量 / core 级整包、sha256 全程校验、可回滚
-
-深度文档：[ARCHITECTURE.md](ARCHITECTURE.md)（设计原则 / 模块设计 / ADR）· [CLAUDE.md](CLAUDE.md)（工作手册）。
+- 套件模型：**平台组件（官方 zip 原样分发，一字不动）+ 插件组件（7 子仓）+ profile 种子**；定制只进 `data/`（配置种子 + 插件）与 `suite-tools/`（更新器）
+- 插件子仓日常浮动跟随各仓最新，`release` 时自动钉定——任意历史版本可冷复原
+- 自带目标机更新器：插件级增量 / 平台级整包、sha256 全程校验、可回滚
 
 ## 快速开始
 
@@ -17,36 +15,23 @@ git clone --recursive https://github.com/MintSpearCandy/TabbySuite.git
 cd TabbySuite/tools/suitectl && npm install   # 依赖仅 js-yaml
 cd ../..
 node tools/suitectl/cli.js env                # 环境自检（换机/新克隆先跑）
-node tools/suitectl/cli.js up                 # 一键全绿：sync + core 查新 + build + verify
 ```
 
-core zip 缺失时自动按官方 Releases 直链下载 + sha256 校验并登记 `vendor/index.json`。产物在 `build/stage/`；`release` 出包到 `releases/` 并上传 GitHub Releases（含更新通道 channel.json）。
+## 日常操作（就两条）
 
-## 命令一览
-
-`suitectl` = `node tools/suitectl/cli.js`（`suitectl help` 为准）：
-
-| 场景 | 命令 |
-|---|---|
-| 一键集成（人工回路） | `up` —— sync 子仓最新 + core 查新（`pin:auto` 自动前进）+ build + verify |
-| 滚动更新（调度回路） | `rollout [--release] [--force]` —— 幂等：core 无新版且子仓无前进 → 零动作退出；可挂计划任务/cron |
-| 出包发布 | `release` —— 门禁 → 出包 → 自动钉定 commit + tag → 上传（`--no-upload` 跳过） |
-| core 版本 | `core latest` 查官方最新；`core use <v>\|latest` 显式前进（下载 + 登记 + 重钉 reference） |
-| 子仓同步 | `sync` —— 分支安全快进（只动 `.gitmodules` 分支上的干净检出） |
-| 构建 / 验证 | `build` / `verify`（隔离实例四级断言；`.verify-passed` 绑定 stage 树 hash） |
-| 插件开发 | `dev up \| deploy [组件…] [--restart] \| restart \| down \| status` —— 长驻实例、脏树允许、秒级单插件部署 |
-| 目标机更新 | `update --dest <目录> [--check\|--apply\|--rollback]` · `doctor --dest <目录>` |
-| 预检 / 缓存 | `env [--json]` · `vendor status \| fetch [版本]` |
-
-## 环境配置（换机不改仓库）
-
-内容配置（构建什么）只有 `bundle.yaml`；"本机怎么跑"归环境配置层，按优先级逐层覆盖：
-
-```
-代码默认值 ← suitectl.config.yaml（共享） ← suitectl.local.yaml（本机，gitignore） ← TABBYSUITE_* 环境变量
+```bash
+node tools/suitectl/cli.js up        # 拉子仓最新 + 平台查新 + 构建 + 门禁验证
+node tools/suitectl/cli.js release   # 出包 → 自动钉定 commit+tag → 上传 GH Releases
+git push origin main --tags          # 发布后推送（子仓必须已 push，门禁会检查）
 ```
 
-可覆盖：路径（vendor / cache / build / runtime / releases）、CDP 端口、平台工具（exe / powershell / npm shell）、代理（`net.proxy`，临时 `TABBYSUITE_PROXY`，空串 = 强制直连）。示例见 [suitectl.config.example.yaml](suitectl.config.example.yaml)。
+平台 zip 缺失时自动按官方 Releases 直链下载 + sha256 校验并登记 `platform/index.json`。产物在 `releases/`（zip 不入库；channel / SHA256SUMS / CHANGELOG 入库）。
+
+细粒度命令（`up` 的内部步骤，按需单独调用）：`sync` · `build` · `verify` · `platform list|latest|use|fetch|ref` · `component ls` —— 见 `suitectl help`。
+
+## 版本纪律（一句话）
+
+**全浮动 · 发布即锁**：日常 `up` 零 commit 跟随最新；`release` 自动钉定 gitlink + bundle + tag `suite/<平台版本>-s<serial>`——任意历史版本 `git clone --recursive && git checkout <tag>` 冷复原。serial 由 channel 派生，全自动。
 
 ## 目标机更新（已安装套件的机器）
 
@@ -56,27 +41,30 @@ core zip 缺失时自动按官方 Releases 直链下载 + sha256 校验并登记
 suite-tools/suitectl.ps1 check | apply | rollback | doctor [-Proxy http://…]
 ```
 
-- 判断规则只有一条：core 变了 → 整包换名（rename dance）；core 没变 → 只换变化的插件目录
+- 判断规则只有一条：平台变了 → 整包换名（rename dance）；平台没变 → 只换变化的插件目录
 - 全程 zip sha256 + 目录 treeSha256 校验；`.old` / `.backup` 可回滚
 - 更新通道走 GitHub Releases 固定 URL（`…/releases/latest/download/channel.json`），免 API 免限流
 
-## 版本纪律（一句话）
+## 环境配置（换机不改仓库）
 
-**全浮动 · 发布即锁**：日常 `up` 零 commit 跟随最新；`release` 自动钉定 gitlink + bundle + tag `suite/<core>-s<serial>`——任意历史版本 `git clone --recursive && git checkout <tag>` 冷复原。
-
-## 目录速览
+内容配置（构建什么）只有 `bundle.yaml`（平台组件版本 + 插件清单）；"本机怎么跑"归环境配置层，按优先级逐层覆盖：
 
 ```
-bundle.yaml          内容配置（core 版本与 pin / integrate / probes / rules）
-components/          8 插件子仓 = 开发现场（7 集成 + 1 exclude）
-reference/tabby      Tabby 核心源码参考（shallow，与构建 core 同版）
+代码默认值 ← suitectl.config.yaml（共享）← suitectl.local.yaml（本机，gitignore）← TABBYSUITE_* 环境变量
+```
+
+可覆盖：路径（platformZips / work / releases）、CDP 端口、宿主工具、代理（`net.proxy`，临时 `TABBYSUITE_PROXY`，空串 = 强制直连）。示例见 [suitectl.config.example.yaml](suitectl.config.example.yaml)。
+
+## 目录速览（按生命周期三分）
+
+```
+bundle.yaml          内容配置（平台组件版本与 pin / integrate / probes / rules）
+components/          插件组件 = 集成输入（7 子仓；开发在各插件独立仓；component ls 看收编状态）
+platform/            平台组件：index.json 版本登记 + zip 缓存（可移出）+ reference/ 按需源码参考
 profiles/base/       配置种子（仅首次播种，此后归用户所有）
-suite-tools/         目标机更新器（ps1，单一实现；CLI 的 update/doctor 转调它）
-tools/suitectl/      流水线 CLI（Node ≥ 22，依赖仅 js-yaml）
-vendor/              官方 core zip 缓存 + index.json（sha256 登记；zip 不入库）
+tools/               suitectl（流水线 CLI）+ updater（目标机更新器 ps1）
+.work/               全部工作状态：stage/平台解包缓存/插件工件/安装戳/verify 实例（gitignore，可整体删重建）
 releases/            产物：zip（不入库）+ channel + SHA256SUMS + CHANGELOG
 ```
 
-## 插件开发
-
-直接在 `components/<dir>` 子仓内进行（各自独立 GitHub 远端）；子仓 commit + push 后 `suitectl up` 即集成（gitlink 漂移是常态，`release` 时钉定）。推送顺序铁律：**先子仓后父仓**——release 门禁已机器检查。
+深度文档：[ARCHITECTURE.md](ARCHITECTURE.md)（设计原则 / 模块设计 / ADR）· [CLAUDE.md](CLAUDE.md)（工作手册）· [PLUGIN_CONTRACT.md](PLUGIN_CONTRACT.md)（插件仓集成契约）。

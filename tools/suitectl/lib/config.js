@@ -1,5 +1,5 @@
 'use strict';
-// 环境配置层 —— 把"在哪构建/在哪跑、用哪个平台工具、走哪个代理"从代码与本机假设里抽出来。
+// 环境配置层 —— 把"在哪构建/在哪跑、用哪个宿主工具、走哪个代理"从代码与本机假设里抽出来。
 //
 // 分层覆盖（后者覆盖前者）：
 //   1. 代码默认值（本文件 DEFAULTS）
@@ -7,15 +7,18 @@
 //   3. <repo>/suitectl.local.yaml    —— 本机覆盖，gitignore 不入库（端口/目录/代理等本机事实）
 //   4. TABBYSUITE_* 环境变量          —— 临时/CI 覆盖
 //
-// 与 bundle.yaml 的分工：bundle.yaml 是"构建什么"（内容配置，随套件发布走）；
+// 与 bundle.yaml 的分工：bundle.yaml 是"构建什么"（内容配置，随套件发布走——平台组件版本 + integrate 列表）；
 // 本层是"本机怎么跑"（环境配置，不随套件分发）。两者不互相污染。
+//
+// v4 命名：宿主机器工具（exe/powershell/npmShell）= host.*（原 platform.*，为平台组件让名）；
+//   工作状态全部归一 paths.work（.work/：stage/platform-cache/plugins/install/instance）。
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 
-const PLATFORM_EXE = {
+const HOST_EXE = {
   win32: 'Tabby.exe',
   darwin: 'Tabby.app/Contents/MacOS/Tabby',
   linux: 'tabby',
@@ -23,15 +26,14 @@ const PLATFORM_EXE = {
 
 const DEFAULTS = {
   paths: {
-    // core zip 存放目录（可指向仓库外的机器目录；vendor/index.json 仍固定在仓库内）
-    vendor: 'vendor',
-    cache: 'cache',
-    build: 'build',
-    runtime: 'runtime',
+    // 平台 zip 存放目录（默认 platform/，可指向仓库外的机器目录；platform/index.json 固定在仓库内）
+    platformZips: 'platform',
+    // 工作状态根：stage / platform-cache / plugins 工件缓存 / install 戳 / verify 实例（整体 gitignore，可整体删除重建）
+    work: '.work',
     releases: 'releases',
   },
-  platform: {
-    // 可执行文件名（相对 core / 实例根）。默认按当前系统推断；非默认包可覆盖。
+  host: {
+    // 平台可执行文件名（相对平台解包树 / 实例根）。默认按当前系统推断；非默认包可覆盖。
     exe: null,
     // 进程管理（按路径杀/数进程）在 Windows 依赖 PowerShell；非 Windows 用 ps。
     powershell: process.platform === 'win32' ? 'powershell.exe' : null,
@@ -43,7 +45,7 @@ const DEFAULTS = {
     cdp: [9241, 9268],
   },
   net: {
-    // 外网（GitHub API / core zip / channel / gh）代理；null=直连。
+    // 外网（GitHub API / 平台 zip / channel / gh）代理；null=直连。
     // 本机常驻代理写 suitectl.local.yaml（net.proxy: http://127.0.0.1:7892），
     // 临时切换用环境变量 TABBYSUITE_PROXY（空串=强制直连）。
     proxy: null,
@@ -52,18 +54,16 @@ const DEFAULTS = {
     // 分发托管仓（GitHub <owner>/<repo>）：release 上传目标 + 更新器 channel 直链推导
     repo: 'MintSpearCandy/TabbySuite',
   },
-  vendor: {
-    // core zip 缺失时按 vendor/index.json 的 origin 自动下载（sha256 校验）
+  platform: {
+    // 平台 zip 缺失时按 platform/index.json 的 origin 自动下载（sha256 校验）
     autoDownload: true,
     downloadTimeoutSec: 15 * 60,
   },
 };
 
 const ENV_PATHS = {
-  TABBYSUITE_VENDOR: 'vendor',
-  TABBYSUITE_CACHE: 'cache',
-  TABBYSUITE_BUILD: 'build',
-  TABBYSUITE_RUNTIME: 'runtime',
+  TABBYSUITE_PLATFORM_ZIPS: 'platformZips',
+  TABBYSUITE_WORK: 'work',
   TABBYSUITE_RELEASES: 'releases',
 };
 
@@ -131,13 +131,13 @@ if (process.env.TABBYSUITE_CDP_RANGE) {
   files.env.push('TABBYSUITE_CDP_RANGE');
 }
 for (const [envName, apply] of [
-  ['TABBYSUITE_EXE', v => { cfg.platform = { ...cfg.platform, exe: v }; }],
-  ['TABBYSUITE_POWERSHELL', v => { cfg.platform = { ...cfg.platform, powershell: v }; }],
-  ['TABBYSUITE_NPM_SHELL', v => { cfg.platform = { ...cfg.platform, npmShell: v }; }],
+  ['TABBYSUITE_EXE', v => { cfg.host = { ...cfg.host, exe: v }; }],
+  ['TABBYSUITE_POWERSHELL', v => { cfg.host = { ...cfg.host, powershell: v }; }],
+  ['TABBYSUITE_NPM_SHELL', v => { cfg.host = { ...cfg.host, npmShell: v }; }],
   ['TABBYSUITE_PROXY', v => { cfg.net = { ...cfg.net, proxy: v || null }; }],
   ['TABBYSUITE_REPO', v => { cfg.dist = { ...cfg.dist, repo: v }; }],
-  ['TABBYSUITE_OFFLINE', v => { cfg.vendor = { ...cfg.vendor, autoDownload: !/^(1|true|yes)$/i.test(v) }; }],
-  ['TABBYSUITE_DOWNLOAD_TIMEOUT_SEC', v => { cfg.vendor = { ...cfg.vendor, downloadTimeoutSec: Number(v) }; }],
+  ['TABBYSUITE_OFFLINE', v => { cfg.platform = { ...cfg.platform, autoDownload: !/^(1|true|yes)$/i.test(v) }; }],
+  ['TABBYSUITE_DOWNLOAD_TIMEOUT_SEC', v => { cfg.platform = { ...cfg.platform, downloadTimeoutSec: Number(v) }; }],
 ]) {
   if (process.env[envName] !== undefined) {
     apply(process.env[envName]);
@@ -158,32 +158,41 @@ if (!Array.isArray(cdp) || cdp.length !== 2 || !cdp.every(n => Number.isInteger(
 if (cfg.net.proxy && !/^(https?|socks5h?):\/\//i.test(String(cfg.net.proxy))) {
   throw new Error(`环境配置 net.proxy 需形如 http://127.0.0.1:7892（当前 ${JSON.stringify(cfg.net.proxy)}）`);
 }
-if (!Number.isInteger(cfg.vendor.downloadTimeoutSec) || cfg.vendor.downloadTimeoutSec <= 0) {
-  throw new Error('环境配置 vendor.downloadTimeoutSec 必须是正整数');
+if (!Number.isInteger(cfg.platform.downloadTimeoutSec) || cfg.platform.downloadTimeoutSec <= 0) {
+  throw new Error('环境配置 platform.downloadTimeoutSec 必须是正整数');
 }
 
-cfg.platform = {
-  ...cfg.platform,
-  exe: cfg.platform.exe || PLATFORM_EXE[process.platform] || null,
+cfg.host = {
+  ...cfg.host,
+  exe: cfg.host.exe || HOST_EXE[process.platform] || null,
   id: `${process.platform}-${process.arch}`,
 };
 cfg.files = files;
 cfg.root = ROOT;
+
+const work = resolvePath(cfg.paths.work);
 
 const P = {
   root: ROOT,
   bundle: path.join(ROOT, 'bundle.yaml'),
   components: path.join(ROOT, 'components'),
   profiles: path.join(ROOT, 'profiles'),
-  suiteTools: path.join(ROOT, 'suite-tools'),
-  vendor: resolvePath(cfg.paths.vendor),
-  vendorIndex: path.join(ROOT, 'vendor', 'index.json'),
-  cacheRoot: resolvePath(cfg.paths.cache),
-  cache: path.join(resolvePath(cfg.paths.cache), 'plugins'),
-  build: resolvePath(cfg.paths.build),
-  stage: path.join(resolvePath(cfg.paths.build), 'stage'),
-  buildReport: path.join(resolvePath(cfg.paths.build), 'build-report.json'),
-  runtime: resolvePath(cfg.paths.runtime),
+  // 平台组件区（仓库内固定）：index.json 登记 + reference/ 按需源码参考；zip 存放目录可移出（platformZips）
+  platformIndex: path.join(ROOT, 'platform', 'index.json'),
+  platformReference: path.join(ROOT, 'platform', 'reference', 'tabby'),
+  platformZips: resolvePath(cfg.paths.platformZips),
+  // 分发内嵌更新器（仓库侧源码位置；zip 内仍为 tabby-suite/suite-tools/suitectl.ps1）
+  updater: path.join(ROOT, 'tools', 'updater'),
+  // 工作状态（.work/，全部 gitignore）
+  work,
+  stage: path.join(work, 'stage'),
+  platformCache: path.join(work, 'platform-cache'),
+  pluginCache: path.join(work, 'plugins'),
+  installStamps: path.join(work, 'install'),
+  instance: path.join(work, 'instance'),
+  instanceErr: path.join(work, 'instance-boot.err'),
+  buildReport: path.join(work, 'build-report.json'),
+  verifyPassed: path.join(work, '.verify-passed'),
   releases: resolvePath(cfg.paths.releases),
   channel: path.join(resolvePath(cfg.paths.releases), 'update-channel.json'),
   configFile: configPath,
